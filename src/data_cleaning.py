@@ -142,7 +142,7 @@ def load_and_clean_data(input_path: str, output_path: str):
     
     print(f"Saving cleaned dataset to {output_path} as JSONL...")
     # Using orient='records' and lines=True saves the dataframe as JSONL
-    df.to_json(output_path, orient='records', lines=True)
+    df.to_json(output_path, orient='records', lines=True, date_format='iso')
     print("Data cleaning complete!")
 
 if __name__ == "__main__":

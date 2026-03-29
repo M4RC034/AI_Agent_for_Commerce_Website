@@ -63,7 +63,7 @@ Returns both the agent's conversational response and the structured product data
 ## Setup & Implementation Timeline
 
 1.  **Day 1:**
-    * Clean the Kaggle CSV using `data_cleaning_and_feature_engineering.ipynb` and download ~100 sample images.
+    * Clean the Kaggle CSV using `data_cleaning.py` and download ~100 sample images.
     * Run a script to create the `catalog.index` using OpenCLIP and FAISS.
 2.  **Day 2:**
     * Build the FastAPI backend with one Tool-Enabled Agent.

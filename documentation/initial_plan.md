@@ -1,9 +1,9 @@
 # Multimodal AI Commerce Agent
 
-Aura is a ready-to-use AI shopping assistant designed for modern commerce. Inspired by Amazon Rufus, Aura uses a "Lean" architecture to handle both text queries and visual inputs efficiently through a single conversational agent.
+This is a ready-to-use AI shopping assistant designed for modern commerce. Inspired by Amazon Rufus, Aura uses a "Lean" architecture to handle both text queries and visual inputs efficiently through a single conversational agent.
 
 ## Technical Highlights
-* **The Brain Orchestrator:** A ReAct Agent (powered by GPT-4o) that acts as the Dispatcher, handling conversations and deciding when to search the catalog.
+* **The Brain Orchestrator:** A ReAct Agent (powered by an LLM) that acts as the Dispatcher, handling conversations and deciding when to search the catalog.
 * **The Worker Index:** A fast, local tool powered by OpenCLIP and FAISS for vector retrieval, keeping the project performant and self-contained without cloud dependencies.
 * **Multimodal Tool-Use:** The agent autonomously handles text-to-product, image-to-product, and complex intent-based queries.
 

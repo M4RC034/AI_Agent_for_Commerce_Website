@@ -29,6 +29,29 @@ class CatalogSearchEngine:
         self.model, _, self.preprocess = open_clip.create_model_and_transforms(model_name, pretrained=pretrained)
         self.model = self.model.to(self.device).eval()
         self.tokenizer = open_clip.get_tokenizer(model_name)
+        
+        # --- Zero-Shot Classification Setup ---
+        print("Pre-computing Zero-Shot Category Vectors...")
+        self.valid_categories = [
+            'Laptops', 'Phones', 'Headphones', 'Chargers & Cables', 'Cameras', 
+            'Storage', 'Smart Home', 'TV & Display', 'Power & Batteries', 
+            'Networking', 'Wearables', 'Speakers', 'Printers & Scanners', 'Gaming'
+        ]
+        
+        self.distractor_categories = [
+            'Fruit', 'Food', 'Animal', 'Furniture', 'Clothing', 'Vehicle', 
+            'Plant', 'Weapon', 'Person', 'Toy', 'Hardware Tool'
+        ]
+        
+        # Encode all categories to compare against incoming images
+        self.all_category_names = self.valid_categories + self.distractor_categories
+        prompt_templates = [f"a photo of a {cat.lower()}" for cat in self.all_category_names]
+        
+        with torch.no_grad():
+            text_tokens = self.tokenizer(prompt_templates).to(self.device)
+            text_features = self.model.encode_text(text_tokens)
+            self.category_vectors = self._normalize(text_features)
+            
         print("Search Engine Ready!")
 
     def _normalize(self, features):
@@ -53,6 +76,28 @@ class CatalogSearchEngine:
             image_features = self.model.encode_image(image_tensor)
             query_vector = self._normalize(image_features)
             
+            # --- The Zero-Shot Gate Check ---
+            # Compare the image vector to our pre-computed category text vectors
+            similarity = (query_vector @ self.category_vectors.T)
+            best_cat_idx = np.argmax(similarity)
+            best_category = self.all_category_names[best_cat_idx]
+            
+            print(f"[ZERO-SHOT GATE] Image confidently classified as: {best_category}")
+            # If the image looks more like a distractor than a valid electronics product, reject it
+            if best_category in self.distractor_categories:
+                print(f"[ZERO-SHOT GATE] Rejected! {best_category} is out-of-distribution.")
+                return [{
+                    "rank": 1,
+                    "score": 0.0,
+                    "product_id": "NONE",
+                    "title": "OUT_OF_BOUNDS_IMAGE",
+                    "category": "Error",
+                    "price": "N/A",
+                    "image_url": "",
+                    "url": "",
+                    "description": f"Internal Note: The uploaded image was classified as a '{best_category}', not an electronic device. Refused to search catalog."
+                }]
+                
         distances, indices = self.index.search(query_vector, k)
         return self._fetch_results(indices[0], distances[0])
 

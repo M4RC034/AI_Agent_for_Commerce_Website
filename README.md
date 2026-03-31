@@ -260,6 +260,8 @@ The unified endpoint that handles all three use cases: general conversation, tex
 
 5. **Client-Side Conversation History:** Multi-turn context is maintained in the browser (no server-side storage or database needed). The frontend sends the last 5 turns as a JSON array with each request, and the backend injects them into the Groq message array. This enables follow-ups like "show me a cheaper one" while keeping the architecture stateless and deployment-simple.
 
+6. **Two-Stage Retrieve and Re-Rank Pipeline:** To solve the inherent precision issues of Bi-encoder vector search without destroying responsiveness, the architecture uses a two-stage pattern. Phase 1 leverages FAISS and MiniLM for fast, high-recall retrieval (casting a wider net of `k=15` candidates). Phase 2 uses a Cross-Encoder (`ms-marco-MiniLM-L-6-v2`) to perform deep semantic re-ranking, efficiently recalculating the relevance permutations of the user's query against the product titles to accurately slice the top 5. This dramatically bridges the 'Semantic Gap'. A strict **Visual Safety Net** prevents purely visual OpenCLIP queries from hitting the text-based Cross-Encoder, actively balancing computational latency against maximum precision.
+
 ---
 
 ## Known Limitations

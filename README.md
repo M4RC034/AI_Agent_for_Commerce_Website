@@ -127,7 +127,7 @@ AI_Agent_for_Commerce_Website/
 ```bash
 git clone https://github.com/M4RC034/AI_Agent_for_Commerce_Website.git
 cd AI_Agent_for_Commerce_Website
-pip install -r backend/requirements.txt
+pip install -r requirements.txt
 ```
 
 ### 2. Set Your API Key

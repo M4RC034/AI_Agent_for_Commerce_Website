@@ -125,7 +125,7 @@ AI_Agent_for_Commerce_Website/
 ### 1. Clone & Install Dependencies
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/AI_Agent_for_Commerce_Website.git
+git clone https://github.com/M4RC034/AI_Agent_for_Commerce_Website.git
 cd AI_Agent_for_Commerce_Website
 pip install -r backend/requirements.txt
 ```

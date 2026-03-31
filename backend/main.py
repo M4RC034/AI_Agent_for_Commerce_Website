@@ -229,7 +229,8 @@ async def chat_endpoint(
             "1. MUST START YOUR RESPONSE EXACTLY WITH: \"According to the information you provide, these are the products that you may be interested:\"\n"
             "2. Then ONLY list the relevant products that answer the user's specific query. Do NOT list, mention, or explain any products you ignored or found irrelevant.\n"
             "3. Explain why the relevant items match their request succinctly.\n"
-            "4. VERY IMPORTANT: You must include the exact ID of the product (e.g., prod_10) in parentheses next to its name when you describe it."
+            "4. VERY IMPORTANT: You must include the exact ID of the product (e.g., prod_10) in parentheses next to its name when you describe it.\n"
+            "5. TRUST THE CATEGORY: If the metadata says a product is in the 'Headphones' category, do not re-categorize it based on other keywords in the description (like 'battery' or 'cable')."
         )
         
         user_prompt = f"User Message: {message}\n\n{context_str}"

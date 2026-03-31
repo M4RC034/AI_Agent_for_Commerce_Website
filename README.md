@@ -262,6 +262,8 @@ The unified endpoint that handles all three use cases: general conversation, tex
 
 6. **Two-Stage Retrieve and Re-Rank Pipeline:** To solve the inherent precision issues of Bi-encoder vector search without destroying responsiveness, the architecture uses a two-stage pattern. Phase 1 leverages FAISS and MiniLM for fast, high-recall retrieval (casting a wider net of `k=15` candidates). Phase 2 uses a Cross-Encoder (`ms-marco-MiniLM-L-6-v2`) to perform deep semantic re-ranking, efficiently recalculating the relevance permutations of the user's query against the product titles to accurately slice the top 5. This dramatically bridges the 'Semantic Gap'. A strict **Visual Safety Net** prevents purely visual OpenCLIP queries from hitting the text-based Cross-Encoder, actively balancing computational latency against maximum precision.
 
+7. **Explainable AI (XAI) Badges:** To build user trust and transparency, the system instructs the LLM to generate a short reasoning badge (e.g., `✨ Visual Match`, `💰 Budget Pick`, `🏆 Top Choice`) for each recommended product. The backend extracts these via a robust regex parser with markdown-sanitization fallbacks (`json.loads` with backtick stripping), maps them to the product objects, and assigns a safe `🎯 Recommended` default if the LLM omits or malforms the JSON. The frontend renders these as glassmorphic pill overlays (`backdrop-filter: blur`) positioned absolutely on each product card image, giving users immediate visual insight into *why* the AI selected each item.
+
 ---
 
 ## Known Limitations

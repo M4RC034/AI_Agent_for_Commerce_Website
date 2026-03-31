@@ -11,7 +11,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     ];
 
     try {
-        const response = await fetch('http://127.0.0.1:8000/api/statistics');
+        const response = await fetch('/api/statistics');
         if (!response.ok) throw new Error('Failed to fetch statistics');
         
         const data = await response.json();

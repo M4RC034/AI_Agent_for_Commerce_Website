@@ -61,21 +61,55 @@
                 </div>
             </div>
 
-            <!-- Search History -->
-            <div class="history-wrapper">
-                <button type="button" id="historyToggleBtn" class="history-toggle-btn" title="Search history">
-                    <i data-lucide="clock" class="icon-small"></i>
-                    <span>History</span>
-                </button>
-                <div id="historyPanel" class="history-panel hidden">
-                    <div class="history-header">
-                        <span>Recent Searches</span>
-                        <button type="button" id="clearHistoryBtn" class="history-clear-btn">Clear</button>
+            <!-- Action Bar (Info & History side-by-side) -->
+            <div class="action-bar">
+                <!-- Info Button -->
+                <div class="info-wrapper">
+                    <button type="button" id="infoToggleBtn" class="action-toggle-btn" title="How to use">
+                        <i data-lucide="info" class="icon-small"></i>
+                        <span>How to use</span>
+                    </button>
+                    <div id="infoPanel" class="action-panel hidden info-panel">
+                        <div class="panel-header">
+                            <span>How to use Al</span>
+                        </div>
+                        <div class="panel-content">
+                            <div class="info-item">
+                                <strong><i data-lucide="message-circle" class="icon-xs"></i> General Chat</strong>
+                                <p>Ask me anything! e.g., <em>"What can you do?"</em></p>
+                            </div>
+                            <div class="info-item">
+                                <strong><i data-lucide="search" class="icon-xs"></i> Text Search</strong>
+                                <p>Describe what you need. e.g., <em>"Recommend me some wireless headphones under $100."</em></p>
+                            </div>
+                            <div class="info-item">
+                                <strong><i data-lucide="camera" class="icon-xs"></i> Image Search</strong>
+                                <p>Click the camera icon to upload a photo of a product you want to find.</p>
+                            </div>
+                            <div class="info-item">
+                                <strong><i data-lucide="sparkles" class="icon-xs"></i> Hybrid Search</strong>
+                                <p>Upload a photo AND type a message. e.g., <em>"Find me something like this but cheaper."</em></p>
+                            </div>
+                        </div>
                     </div>
-                    <ul id="historyList" class="history-list">
-                        <!-- Populated dynamically by script.js -->
-                    </ul>
-                    <p id="historyEmpty" class="history-empty">No search history yet.</p>
+                </div>
+
+                <!-- Search History -->
+                <div class="history-wrapper">
+                    <button type="button" id="historyToggleBtn" class="action-toggle-btn" title="Search history">
+                        <i data-lucide="clock" class="icon-small"></i>
+                        <span>History</span>
+                    </button>
+                    <div id="historyPanel" class="action-panel hidden history-panel">
+                        <div class="panel-header">
+                            <span>Recent Searches</span>
+                            <button type="button" id="clearHistoryBtn" class="clear-btn">Clear</button>
+                        </div>
+                        <ul id="historyList" class="history-list">
+                            <!-- Populated dynamically by script.js -->
+                        </ul>
+                        <p id="historyEmpty" class="panel-empty">No search history yet.</p>
+                    </div>
                 </div>
             </div>
         </section>

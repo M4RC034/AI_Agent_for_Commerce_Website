@@ -25,6 +25,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // ── Search History (persisted in localStorage) ──
     const HISTORY_KEY = 'al_search_history';
     const MAX_HISTORY = 20;
+    const infoToggleBtn = document.getElementById('infoToggleBtn');
+    const infoPanel = document.getElementById('infoPanel');
     const historyToggleBtn = document.getElementById('historyToggleBtn');
     const historyPanel = document.getElementById('historyPanel');
     const historyList = document.getElementById('historyList');
@@ -95,6 +97,22 @@ document.addEventListener('DOMContentLoaded', () => {
         lucide.createIcons();
     }
 
+    // Toggle info panel
+    infoToggleBtn.addEventListener('click', () => {
+        const isOpen = !infoPanel.classList.contains('hidden');
+        if (isOpen) {
+            infoPanel.classList.add('hidden');
+            infoToggleBtn.classList.remove('active');
+        } else {
+            // Close history panel if open
+            historyPanel.classList.add('hidden');
+            historyToggleBtn.classList.remove('active');
+            
+            infoPanel.classList.remove('hidden');
+            infoToggleBtn.classList.add('active');
+        }
+    });
+
     // Toggle history panel
     historyToggleBtn.addEventListener('click', () => {
         const isOpen = !historyPanel.classList.contains('hidden');
@@ -102,19 +120,30 @@ document.addEventListener('DOMContentLoaded', () => {
             historyPanel.classList.add('hidden');
             historyToggleBtn.classList.remove('active');
         } else {
+            // Close info panel if open
+            infoPanel.classList.add('hidden');
+            infoToggleBtn.classList.remove('active');
+
             renderSearchHistory();
             historyPanel.classList.remove('hidden');
             historyToggleBtn.classList.add('active');
         }
     });
 
-    // Close history panel when clicking outside
+    // Close panels when clicking outside
     document.addEventListener('click', (e) => {
         if (!historyPanel.classList.contains('hidden') &&
             !historyPanel.contains(e.target) &&
             !historyToggleBtn.contains(e.target)) {
             historyPanel.classList.add('hidden');
             historyToggleBtn.classList.remove('active');
+        }
+        
+        if (!infoPanel.classList.contains('hidden') &&
+            !infoPanel.contains(e.target) &&
+            !infoToggleBtn.contains(e.target)) {
+            infoPanel.classList.add('hidden');
+            infoToggleBtn.classList.remove('active');
         }
     });
 
@@ -173,9 +202,11 @@ document.addEventListener('DOMContentLoaded', () => {
         chatResponse.innerHTML = '';
         productGallery.innerHTML = '';
 
-        // Close history panel if open
+        // Close panels if open
         historyPanel.classList.add('hidden');
         historyToggleBtn.classList.remove('active');
+        infoPanel.classList.add('hidden');
+        infoToggleBtn.classList.remove('active');
 
         // Prepare data
         const formData = new FormData();
@@ -190,7 +221,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (message) addToSearchHistory(message);
 
         try {
-            const response = await fetch('http://127.0.0.1:8000/api/chat', {
+            const response = await fetch('/api/chat', {
                 method: 'POST',
                 body: formData
             });

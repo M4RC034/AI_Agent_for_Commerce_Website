@@ -1,4 +1,6 @@
+import torch
 import os
+import re
 import uvicorn
 import io
 import json
@@ -8,15 +10,34 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from PIL import Image
 
+# Automatically load API keys from .env or api_key.env
+import base64
+from dotenv import load_dotenv
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+load_dotenv(os.path.join(BASE_DIR, '.env'))
+load_dotenv(os.path.join(BASE_DIR, 'backend', 'api_key.env'))
+
 try:
     from groq import Groq
 except ImportError:
     Groq = None
 
 # We use python-dotenv indirectly or normally just reading OS env
-from .search_engine import CatalogSearchEngine
+from search_engine import CatalogSearchEngine
 
-app = FastAPI(title="AI Commerce Agent Backend")
+app = FastAPI(
+    title="Al — AI Commerce Agent API",
+    description=(
+        "A multimodal AI shopping assistant that supports **text-based product recommendations**, "
+        "**image-based product search**, and **general conversation**.\n\n"
+        "- **Text only →** MiniLM encoder + FAISS text index\n"
+        "- **Image only →** OpenCLIP encoder + FAISS visual index + Zero-Shot Distractor Gate\n"
+        "- **Text + Image →** Late Fusion via Reciprocal Rank Fusion (RRF)\n"
+        "- **General chat →** Direct LLM conversation (no retrieval)\n\n"
+        "Reasoning powered by Llama-3.1-8b-instant on Groq."
+    ),
+    version="1.0.0",
+)
 
 # Setup CORS for the frontend
 app.add_middleware(
@@ -46,91 +67,281 @@ def startup_event():
         print("WARNING: FAISS Index or Catalog JSONL missing! Please run Day 1 scripts.")
         
     groq_api_key = os.environ.get("GROQ_API_KEY")
-    
-    # Check if user put it in api_key.txt
-    api_key_path = os.path.join(BASE_DIR, "api_key.txt")
-    if not groq_api_key and os.path.exists(api_key_path):
-        with open(api_key_path, "r") as f:
-            groq_api_key = f.read().strip(" .\n\r")
-            
     if groq_api_key and Groq:
         groq_client = Groq(api_key=groq_api_key)
-        print("Groq Client API Key Loaded Successfully!")
     else:
-        print("WARNING: GROQ_API_KEY not found. Please set the environment variable or place it in api_key.txt")
+        print("WARNING: GROQ_API_KEY environment variable not set. LLM inference will fail.")
 
 @app.get("/")
 def health_check():
     return {"status": "ok", "message": "Aura Backend is running!"}
 
+@app.get("/api/statistics")
+def get_statistics():
+    """Return category distribution for the pie chart."""
+    if not search_engine:
+        raise HTTPException(status_code=500, detail="Search engine not initialized")
+        
+    counts = search_engine.df['product_category'].value_counts().to_dict()
+        
+    return {"categories": counts}
+
 @app.post("/api/chat")
 async def chat_endpoint(
     message: str = Form(...),
-    image: Optional[UploadFile] = File(None)
+    image: Optional[UploadFile] = File(None),
+    history_json: str = Form("[]")
 ):
     """
-    The Single 'Vision-via-Retrieval' Endpoint.
-    1. Visual Retrieval (or Text Retrieval).
-    2. DeepSeek RAG reasoning over the metadata.
-    3. Return structured API payload.
+    The Single 'Vision-via-Retrieval' Endpoint with multi-turn support.
+    Accepts an optional history_json field containing previous conversation turns.
     """
     if not groq_client:
         raise HTTPException(status_code=500, detail="Groq API Key not configured.")
+    
+    # Parse conversation history (sent as JSON string via FormData)
+    try:
+        history = json.loads(history_json)
+        # Keep only the last 5 turns to stay within token limits
+        history = history[-5:]
+    except (json.JSONDecodeError, TypeError):
+        history = []
         
     try:
+        # ── Intent Detection: General Conversation vs Product Query ──
+        # If no image is attached, check whether the message is a general
+        # conversational question (no product intent) and handle it directly
+        # without hitting the retrieval pipeline.
+        if not image and _is_general_conversation(message):
+            return await _handle_general_conversation(message, history)
+        
         context_items = []
-        if image:
-            # Step 1a: Use the Eyes (OpenCLIP Visual Search)
+        is_default_msg = message == "Please find items visually similar to this image."
+        
+        if image and message and not is_default_msg:
+            # Both provided -> Late Fusion Hybrid Search
             image_bytes = await image.read()
             pil_img = Image.open(io.BytesIO(image_bytes)).convert('RGB')
-            context_items = search_engine.search_by_image(pil_img, k=3)
+            context_items = search_engine.hybrid_search(message, pil_img, k=5)
+            
+        elif image:
+            # Only Image provided -> OpenCLIP
+            image_bytes = await image.read()
+            pil_img = Image.open(io.BytesIO(image_bytes)).convert('RGB')
+            context_items = search_engine.search_by_image(pil_img, k=5)
+            
         else:
-            # Step 1b: If no image, fallback to vector text search based on the message
+            # Only Text provided -> MiniLM
             context_items = search_engine.search_by_text(message, k=5)
             
         # Format the FAISS results to feed to the "Brain"
+        valid_cats = [
+            'Laptops', 'Phones', 'Headphones', 'Chargers & Cables', 'Cameras', 
+            'Storage', 'Smart Home', 'TV & Display', 'Power & Batteries', 
+            'Networking', 'Wearables', 'Speakers', 'Printers & Scanners', 'Gaming',
+            'Computers & Accessories', 'Computer Accessories & Peripherals', 'Monitors'
+        ]
+
         context_str = "VISUAL/METADATA RAG SEARCH RESULTS:\n\n"
+        final_products = []
         for i, item in enumerate(context_items):
-            context_str += f"[Result {i+1}] Title: {item.get('title')}\n"
-            context_str += f"Category: {item.get('category')} | Price: ${item.get('price')}\n\n"
+            # Strict safety net: ONLY pass electronic categories to the LLM
+            if item.get('product_id') != 'NONE' and item.get('category', '') in valid_cats:
+                final_products.append(item)
+                context_str += f"[Result {len(final_products)}] ID: {item.get('product_id')} | Title: {item.get('title')}\n"
+                context_str += f"Category: {item.get('category')} | Price: ${item.get('price')}\n\n"
+                
+        # Handle the Empty Context Edge Case (OOD Rejection)
+        if len(final_products) == 0:
+            image_description = "this item"
             
-        # Step 2: Use the Brain (DeepSeek-R1-Distill-Llama-70B on Groq)
+            # If an image was provided, ask the Vision model to describe it first
+            if image:
+                try:
+                    # Depending on FastAPI version, await image.seek(0) may crash if it's a synchronous SpooledTemporaryFile
+                    # Safest cross-version fallback is to seek the underlying python file object natively
+                    image.file.seek(0)
+                    image_bytes = await image.read()
+                    base64_image = base64.b64encode(image_bytes).decode('utf-8')
+                    
+                    # Use Llama 3.2 Vision to identify the OOD item
+                    vision_completion = groq_client.chat.completions.create(
+                        messages=[
+                            {
+                                "role": "user",
+                                "content": [
+                                    {"type": "text", "text": "Identify the primary object in this image. Answer with only the name of the object (e.g., 'a dishwasher' or 'a wooden table')."},
+                                    {
+                                        "type": "image_url", 
+                                        "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}
+                                    }
+                                ]
+                            }
+                        ],
+                        model="llama-3.2-11b-vision-preview",
+                    )
+                    image_description = vision_completion.choices[0].message.content.strip().lower()
+                    
+                except Exception as vision_err:
+                    print(f"Vision analysis failed: {str(vision_err)}")
+                    image_description = "this item"
+
+            return {
+                "agent_response": (
+                    f"According to the information you provided, you are likely looking for {image_description}. "
+                    "I'm sorry, but this appears to be outside of our catalog. We specialize exclusively "
+                    "in electronics, and I could not confidently find any safe, relevant items that "
+                    "visually or conceptually matched your request."
+                ),
+                "products": []
+            }
+            
+        # Step 2: Use the Brain
         system_prompt = (
-            "You are Aura, an elite AI shopping assistant for a commerce website. "
-            "You must rely ONLY on the VISUAL/METADATA RAG SEARCH RESULTS provided in the prompt to make recommendations. "
-            "Do NOT invent products. The user uploaded an image or query, and the backend engine visually found the products below. "
-            "Explain to the user why these specific items match their request, or help them decide based on constraints."
+            "You are an elite AI shopping assistant for a commerce website.\n"
+            "CRITICAL RULES:\n"
+            "1. MUST START YOUR RESPONSE EXACTLY WITH: \"According to the information you provide, these are the products that you may be interested:\"\n"
+            "2. Then ONLY list the relevant products. Do NOT list, mention, or explain any products you ignored or found irrelevant.\n"
+            "3. Explain why the relevant items match their request succinctly.\n"
+            "4. VERY IMPORTANT: You must include the exact ID of the product (e.g., prod_10) in parentheses next to its name when you describe it."
         )
         
         user_prompt = f"User Message: {message}\n\n{context_str}"
         
-        # Deepseek R1 API call
+        # Build message array with conversation history for multi-turn context
+        messages = [{"role": "system", "content": system_prompt}]
+        for turn in history:
+            role = turn.get("role", "user")
+            if role in ("user", "assistant"):
+                messages.append({"role": role, "content": turn.get("content", "")})
+        messages.append({"role": "user", "content": user_prompt})
+        
+        # Groq Llama 3 API call
         chat_completion = groq_client.chat.completions.create(
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            model="deepseek-r1-distill-llama-70b",
+            messages=messages,
+            model="llama-3.1-8b-instant",
             temperature=0.6,
         )
         
         agent_raw_reply = chat_completion.choices[0].message.content
+
+        # --- ROBUST ID EXTRACTION ---
+        # Instead of relying on strict formatting, we cross-reference the text 
+        # to see which product IDs the LLM actually mentioned anywhere in its response.
+        selected_ids = set()
+        agent_reply_lower = agent_raw_reply.lower()
         
-        # Format output: Deepseek uses <think> tags. Let's strip them from the frontend view 
-        # or leave them for debugging, but typically for a retail bot we clean the <think> out.
-        formatted_reply = agent_raw_reply
-        if "</think>" in formatted_reply:
-            formatted_reply = formatted_reply.split("</think>")[-1].strip()
+        for p in final_products:
+            pid = str(p.get('product_id', '')).lower()
+            if pid and pid in agent_reply_lower:
+                selected_ids.add(pid)
+                
+        # Filter final_products based on the IDs the LLM actually mentioned
+        if selected_ids:
+            final_products = [
+                p for p in final_products 
+                if str(p.get('product_id', '')).lower() in selected_ids
+            ]
+        else:
+            # If the LLM completely failed to mention ANY IDs, 
+            # we return an empty list so the UI doesn't show hallucinated items.
+            final_products = []
+            
+        # Clean the response for the UI (Remove the IDs from the text if they were added at the end)
+        import re
+        clean_reply = re.sub(r'IDs?:\s*\[.*?\]', '', agent_raw_reply, flags=re.IGNORECASE).strip()
+        
+        if "</think>" in clean_reply:
+            clean_reply = clean_reply.split("</think>")[-1].strip()
         
         return {
-            "agent_response": formatted_reply,
-            "thoughts": agent_raw_reply.split("</think>")[0].replace("<think>", "").strip() if "</think>" in agent_raw_reply else "",
-            "products": context_items
+            "agent_response": clean_reply,
+            "products": final_products
         }
 
     except Exception as e:
         print(f"Error during chat handling: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# ── Intent Detection Helpers ──────────────────────────────────────────
+
+# Conversational patterns that indicate the user is NOT looking for products.
+_GENERAL_PATTERNS = [
+    r"\b(what(?:'s| is) your name)\b",
+    r"\b(who are you)\b",
+    r"\b(what can you do)\b",
+    r"\b(how are you)\b",
+    r"\b(tell me about yourself)\b",
+    r"\b(what are you)\b",
+    r"\b(what do you sell|what do you have)\b",
+    r"\b(help me|what do you offer)\b",
+    r"\b(hello|hi|hey|good morning|good afternoon|good evening|good night)\b",
+    r"\b(thank(?:s| you))\b",
+    r"\b(bye|goodbye|see you)\b",
+]
+_GENERAL_RE = re.compile("|".join(_GENERAL_PATTERNS), re.IGNORECASE)
+
+# Product-intent signals — if any of these appear, treat it as a product query
+# even if it also matches a greeting (e.g. "hi, recommend me headphones").
+_PRODUCT_SIGNALS = [
+    r"\b(recommend|suggest|find|search|show|looking for|need|want|buy|compare)\b",
+    r"\b(cheap|budget|best|top|affordable|premium|under \$?\d+)\b",
+    r"\b(laptop|phone|headphone|earbuds|charger|cable|camera|speaker|monitor|tv|watch|printer|keyboard|mouse|tablet)s?\b",
+]
+_PRODUCT_RE = re.compile("|".join(_PRODUCT_SIGNALS), re.IGNORECASE)
+
+
+def _is_general_conversation(message: str) -> bool:
+    """Return True if the message is a general/conversational query with
+    no product-search intent."""
+    text = message.strip()
+    # Very short messages with no product keywords are likely greetings
+    if len(text.split()) <= 4 and _GENERAL_RE.search(text) and not _PRODUCT_RE.search(text):
+        return True
+    # Longer messages: only treat as general if they match a pattern AND
+    # have zero product signals
+    if _GENERAL_RE.search(text) and not _PRODUCT_RE.search(text):
+        return True
+    return False
+
+
+async def _handle_general_conversation(message: str, history: list = None) -> dict:
+    """Send the message directly to the LLM with a conversational persona,
+    bypassing the retrieval pipeline entirely. Supports multi-turn context."""
+    system_prompt = (
+        "You are Al, a friendly and helpful AI shopping assistant for an electronics "
+        "commerce website. You specialize in electronics such as laptops, phones, "
+        "headphones, cameras, speakers, TVs, and more.\n\n"
+        "When users greet you or ask general questions, respond warmly and concisely. "
+        "Let them know you can help them find electronics by describing what they need "
+        "in text, or by uploading a photo of a product they want to find.\n\n"
+        "CRITICAL INSTRUCTION: If the user asks 'what do you sell', 'what do you have', or similar inventory questions, "
+        "you MUST explicitly answer: 'We mainly focus on electronics. Please check the \"About\" section to see what kinds of items we have.'\n\n"
+        "Keep responses short (2-4 sentences). Be personable but professional."
+    )
+
+    # Build message array with conversation history
+    messages = [{"role": "system", "content": system_prompt}]
+    if history:
+        for turn in history:
+            role = turn.get("role", "user")
+            if role in ("user", "assistant"):
+                messages.append({"role": role, "content": turn.get("content", "")})
+    messages.append({"role": "user", "content": message})
+
+    chat_completion = groq_client.chat.completions.create(
+        messages=messages,
+        model="llama-3.1-8b-instant",
+        temperature=0.7,
+    )
+
+    reply = chat_completion.choices[0].message.content.strip()
+    # Clean any stray think tags
+    if "</think>" in reply:
+        reply = reply.split("</think>")[-1].strip()
+
+    return {"agent_response": reply, "products": []}
+
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

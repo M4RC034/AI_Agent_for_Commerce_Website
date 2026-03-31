@@ -66,15 +66,16 @@ def startup_event():
     else:
         print("WARNING: FAISS Index or Catalog JSONL missing! Please run Day 1 scripts.")
         
-    groq_api_key = os.environ.get("GROQ_API_KEY")
+    raw_key = os.environ.get("GROQ_API_KEY", "")
+    groq_api_key = raw_key.strip().strip('"').strip("'")
     if groq_api_key and Groq:
         groq_client = Groq(api_key=groq_api_key)
     else:
         print("WARNING: GROQ_API_KEY environment variable not set. LLM inference will fail.")
 
-@app.get("/")
+@app.get("/api/health")
 def health_check():
-    return {"status": "ok", "message": "Aura Backend is running!"}
+    return {"status": "ok", "message": "Al Backend is running!"}
 
 @app.get("/api/statistics")
 def get_statistics():
@@ -118,21 +119,30 @@ async def chat_endpoint(
         context_items = []
         is_default_msg = message == "Please find items visually similar to this image."
         
+        # --- Metadata Pre-Filtering ---
+        # Extract dynamic constraints (like max price) before searching
+        max_price = None
+        if message and not is_default_msg:
+            # Look for phrasing like "under $100" or "less than 50"
+            price_match = re.search(r'(?:under|below|less than|cheaper than)\s*\$?\s*(\d+(?:\.\d{1,2})?)', message, re.IGNORECASE)
+            if price_match:
+                max_price = float(price_match.group(1))
+        
         if image and message and not is_default_msg:
             # Both provided -> Late Fusion Hybrid Search
             image_bytes = await image.read()
             pil_img = Image.open(io.BytesIO(image_bytes)).convert('RGB')
-            context_items = search_engine.hybrid_search(message, pil_img, k=5)
+            context_items = search_engine.hybrid_search(message, pil_img, k=5, max_price=max_price)
             
         elif image:
             # Only Image provided -> OpenCLIP
             image_bytes = await image.read()
             pil_img = Image.open(io.BytesIO(image_bytes)).convert('RGB')
-            context_items = search_engine.search_by_image(pil_img, k=5)
+            context_items = search_engine.search_by_image(pil_img, k=5, max_price=max_price)
             
         else:
             # Only Text provided -> MiniLM
-            context_items = search_engine.search_by_text(message, k=5)
+            context_items = search_engine.search_by_text(message, k=5, max_price=max_price)
             
         # Format the FAISS results to feed to the "Brain"
         valid_cats = [
@@ -148,33 +158,35 @@ async def chat_endpoint(
             # Strict safety net: ONLY pass electronic categories to the LLM
             if item.get('product_id') != 'NONE' and item.get('category', '') in valid_cats:
                 final_products.append(item)
-                context_str += f"[Result {len(final_products)}] ID: {item.get('product_id')} | Title: {item.get('title')}\n"
-                context_str += f"Category: {item.get('category')} | Price: ${item.get('price')}\n\n"
+                res_index = len(final_products)
+                title = item.get('title', '')
+                context_str += f"[Result {res_index}] ID: {item.get('product_id')} | Title: {title}\n"
+                context_str += f"Category: {item.get('category')} | Price: ${item.get('price')}\n"
+                
+                # --- Attribute Extraction Hint ---
+                storage_match = re.search(r'(\d+)\s*(?:TB|GB)', title, re.IGNORECASE)
+                if storage_match:
+                    context_str += f"HINT: Result {res_index} has {storage_match.group(0).upper()} Storage.\n"
+                    
+                context_str += "\n"
                 
         # Handle the Empty Context Edge Case (OOD Rejection)
+        # --- Handle the Empty Context Edge Case (OOD Rejection) ---
         if len(final_products) == 0:
-            image_description = "this item"
-            
-            # If an image was provided, ask the Vision model to describe it first
             if image:
+                image_description = "this item"
                 try:
-                    # Depending on FastAPI version, await image.seek(0) may crash if it's a synchronous SpooledTemporaryFile
-                    # Safest cross-version fallback is to seek the underlying python file object natively
                     image.file.seek(0)
                     image_bytes = await image.read()
                     base64_image = base64.b64encode(image_bytes).decode('utf-8')
                     
-                    # Use Llama 3.2 Vision to identify the OOD item
                     vision_completion = groq_client.chat.completions.create(
                         messages=[
                             {
                                 "role": "user",
                                 "content": [
                                     {"type": "text", "text": "Identify the primary object in this image. Answer with only the name of the object (e.g., 'a dishwasher' or 'a wooden table')."},
-                                    {
-                                        "type": "image_url", 
-                                        "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}
-                                    }
+                                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}}
                                 ]
                             }
                         ],
@@ -184,24 +196,38 @@ async def chat_endpoint(
                     
                 except Exception as vision_err:
                     print(f"Vision analysis failed: {str(vision_err)}")
-                    image_description = "this item"
-
-            return {
-                "agent_response": (
-                    f"According to the information you provided, you are likely looking for {image_description}. "
-                    "I'm sorry, but this appears to be outside of our catalog. We specialize exclusively "
-                    "in electronics, and I could not confidently find any safe, relevant items that "
-                    "visually or conceptually matched your request."
-                ),
-                "products": []
-            }
+                
+                # Image OOD Response
+                return {
+                    "agent_response": (
+                        f"According to the image you provided, you are likely looking for {image_description}. "
+                        "I'm sorry, but this appears to be outside of our catalog. We specialize exclusively "
+                        "in electronics, and I could not confidently find any safe, relevant matches."
+                    ),
+                    "products": []
+                }
+            else:
+                # Text-Only OOD Response
+                return {
+                    "agent_response": (
+                        "I'm sorry, but it looks like you are searching for items outside of our catalog. "
+                        "We specialize exclusively in electronics, and I couldn't find any relevant matches "
+                        "for your request. Could I help you find a laptop, phone, or accessory instead?"
+                    ),
+                    "products": []
+                }
             
         # Step 2: Use the Brain
         system_prompt = (
-            "You are an elite AI shopping assistant for a commerce website.\n"
+            "You are Al, an elite AI shopping assistant for a commerce website.\n"
+            "When a user asks to compare products or find the 'best/most' of an attribute (like storage, price, or speed):\n"
+            "1. Look at the VISUAL/METADATA RAG SEARCH RESULTS provided.\n"
+            "2. Explicitly compare the values (e.g., 'The Seagate Drive has 12TB while the Western Digital has 8TB').\n"
+            "3. Even if the items are 'Internal' rather than 'External,' answer the user's specific question about capacity first, "
+            "then politely mention the type mismatch (e.g., 'Note: These are internal drives, not external').\n\n"
             "CRITICAL RULES:\n"
             "1. MUST START YOUR RESPONSE EXACTLY WITH: \"According to the information you provide, these are the products that you may be interested:\"\n"
-            "2. Then ONLY list the relevant products. Do NOT list, mention, or explain any products you ignored or found irrelevant.\n"
+            "2. Then ONLY list the relevant products that answer the user's specific query. Do NOT list, mention, or explain any products you ignored or found irrelevant.\n"
             "3. Explain why the relevant items match their request succinctly.\n"
             "4. VERY IMPORTANT: You must include the exact ID of the product (e.g., prod_10) in parentheses next to its name when you describe it."
         )
@@ -248,7 +274,6 @@ async def chat_endpoint(
             final_products = []
             
         # Clean the response for the UI (Remove the IDs from the text if they were added at the end)
-        import re
         clean_reply = re.sub(r'IDs?:\s*\[.*?\]', '', agent_raw_reply, flags=re.IGNORECASE).strip()
         
         if "</think>" in clean_reply:
@@ -342,6 +367,13 @@ async def _handle_general_conversation(message: str, history: list = None) -> di
 
     return {"agent_response": reply, "products": []}
 
+
+from fastapi.staticfiles import StaticFiles
+
+# This mounts your frontend folder to the root URL. 
+# html=True tells it to automatically load index.html when you visit /
+frontend_path = os.path.join(BASE_DIR, "frontend")
+app.mount("/", StaticFiles(directory=frontend_path, html=True), name="frontend")
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

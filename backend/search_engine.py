@@ -1,4 +1,5 @@
 import os
+import re
 import torch
 import open_clip
 import faiss
@@ -59,7 +60,7 @@ class CatalogSearchEngine:
         features /= features.norm(dim=-1, keepdim=True)
         return features.cpu().numpy().astype('float32')
 
-    def search_by_text(self, text_query, k=5):
+    def search_by_text(self, text_query, k=5, max_price=None):
         """Uses MiniLM to search the dedicated text index."""
         if not self.text_index:
             print("ERROR: Dual Index not available for text search.")
@@ -68,10 +69,14 @@ class CatalogSearchEngine:
         # Encode with SentenceTransformers and normalize (required for Inner Product)
         query_vector = self.text_model.encode([text_query], normalize_embeddings=True, convert_to_numpy=True).astype('float32')
         
-        distances, indices = self.text_index.search(query_vector, k)
-        return self._fetch_results(indices[0], distances[0])
+        # Over-fetch if max_price is provided to ensure we have enough results after filtering
+        fetch_k = k * 10 if max_price is not None else k
+        distances, indices = self.text_index.search(query_vector, fetch_k)
+        
+        raw_results = self._fetch_results(indices[0], distances[0])
+        return self._filter_and_rerank(raw_results, max_price, k)
 
-    def search_by_image(self, image_input: Image.Image, k=5):
+    def search_by_image(self, image_input: Image.Image, k=5, max_price=None):
         """Uses OpenCLIP to search the image index."""
         with torch.no_grad():
             image_tensor = self.preprocess(image_input).unsqueeze(0).to(self.device)
@@ -91,16 +96,19 @@ class CatalogSearchEngine:
         # instead of incorrectly demanding the OpenCLIP zero-shot `best_category` string perfectly 
         # match the FAISS catalog string (which caused False Negatives for fuzzy concepts like Monitors vs TVs).
         
-        distances, indices = self.index.search(query_vector, k)
-        return self._fetch_results(indices[0], distances[0])
+        fetch_k = k * 10 if max_price is not None else k
+        distances, indices = self.index.search(query_vector, fetch_k)
+        raw_results = self._fetch_results(indices[0], distances[0])
+        return self._filter_and_rerank(raw_results, max_price, k)
 
-    def hybrid_search(self, text_query, image_input, k=5):
+    def hybrid_search(self, text_query, image_input, k=5, max_price=None):
         """Performs Late Fusion using Reciprocal Rank Fusion (RRF)."""
-        image_results = self.search_by_image(image_input, k=10) # Over-fetch for merging
+        fetch_k = k * 10 if max_price is not None else 10
+        image_results = self.search_by_image(image_input, k=fetch_k) # Over-fetch for merging
         if image_results and image_results[0].get('product_id') == 'NONE':
             return image_results # Fail fast on OOD gate
             
-        text_results = self.search_by_text(text_query, k=10)
+        text_results = self.search_by_text(text_query, k=fetch_k)
         
         # RRF Scoring Map
         rrf_scores = {}
@@ -120,15 +128,14 @@ class CatalogSearchEngine:
         # Sort by best combined RRF score
         sorted_pids = sorted(rrf_scores.keys(), key=lambda x: rrf_scores[x], reverse=True)
         
-        # Return Top K
-        final_results = []
-        for rank, pid in enumerate(sorted_pids[:k]):
+        # Format results
+        combined = []
+        for pid in sorted_pids:
             item = items_map[pid]
-            item['rank'] = rank + 1
             item['score'] = round(rrf_scores[pid] * 100, 4) # Multiply by 100 for readability
-            final_results.append(item)
+            combined.append(item)
             
-        return final_results
+        return self._filter_and_rerank(combined, max_price, k)
 
     def _fetch_results(self, indices, scores):
         results = []
@@ -146,3 +153,28 @@ class CatalogSearchEngine:
                 "url": str(row.get('product_page_url', ''))
             })
         return results
+
+    def _filter_and_rerank(self, results, max_price, limit):
+        if max_price is None:
+            final_list = results[:limit]
+        else:
+            filtered = []
+            for item in results:
+                price_str = item.get('price', '')
+                if price_str == 'N/A':
+                    continue
+                try:
+                    num_str = re.sub(r'[^\d.]', '', str(price_str))
+                    if num_str:
+                        val = float(num_str)
+                        if val <= max_price:
+                            filtered.append(item)
+                except Exception:
+                    pass
+            final_list = filtered[:limit]
+            
+        # Write sequential ranks
+        for i, res in enumerate(final_list):
+            res['rank'] = i + 1
+            
+        return final_list

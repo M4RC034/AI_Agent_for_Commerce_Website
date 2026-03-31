@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title> Al | AI Commerce Agent</title>
+    <link rel="stylesheet" href="style.css">
+    <!-- Modern Typography from Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap"
+        rel="stylesheet">
+    <!-- Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+
+<body>
+    <div class="blob blob-1"></div>
+    <div class="blob blob-2"></div>
+
+    <main class="container">
+        <!-- About Link -->
+        <a href="statistics.html" class="about-link"
+            style="position: absolute; top: 30px; right: 40px; font-weight: 600; text-decoration: none; color: rgba(255, 255, 255, 0.8); background: rgba(255, 255, 255, 0.1); padding: 8px 16px; border-radius: 20px; backdrop-filter: blur(10px); transition: 0.3s; z-index: 100;">About</a>
+
+        <header class="hero">
+            <h1 class="logo" id="greetingLogo">Hi</h1>
+            <p class="subtitle">Your intelligent, multimodal shopping assistant.</p>
+        </header>
+
+        <section class="search-container">
+            <form id="searchForm" class="search-bar">
+
+                <!-- File Upload Wrapper -->
+                <div class="file-upload-wrapper">
+                    <label for="imageUpload" class="upload-btn" title="Upload an image">
+                        <i data-lucide="camera" class="icon"></i>
+                    </label>
+                    <input type="file" id="imageUpload" accept=".jpg, .jpeg, .png, .webp, .heic, .heif" hidden>
+                </div>
+
+                <!-- Text Input -->
+                <input type="text" id="textInput" name="query"
+                    placeholder="Ask Al anything, or upload a photo to find products..." autocomplete="off">
+
+                <!-- Submit Button -->
+                <button type="submit" class="submit-btn">
+                    <i data-lucide="arrow-up" class="icon submit-icon"></i>
+                </button>
+            </form>
+
+            <!-- Dynamic Image Preview -->
+            <div id="imagePreviewContainer" class="image-preview hidden">
+                <div class="preview-content">
+                    <img id="imagePreview" src="" alt="Selected product">
+                    <span id="imageName" class="image-name"></span>
+                    <button type="button" id="removeImageBtn" class="remove-btn">
+                        <i data-lucide="x" class="icon-small"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Search History -->
+            <div class="history-wrapper">
+                <button type="button" id="historyToggleBtn" class="history-toggle-btn" title="Search history">
+                    <i data-lucide="clock" class="icon-small"></i>
+                    <span>History</span>
+                </button>
+                <div id="historyPanel" class="history-panel hidden">
+                    <div class="history-header">
+                        <span>Recent Searches</span>
+                        <button type="button" id="clearHistoryBtn" class="history-clear-btn">Clear</button>
+                    </div>
+                    <ul id="historyList" class="history-list">
+                        <!-- Populated dynamically by script.js -->
+                    </ul>
+                    <p id="historyEmpty" class="history-empty">No search history yet.</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Placeholder for Results (We will populate this later) -->
+        <section id="resultsContainer" class="results-container hidden">
+            <!-- Loading State -->
+            <div id="loadingIndicator" class="loading-state hidden">
+                <div class="spinner"></div>
+                <p>thinking...</p>
+            </div>
+
+            <div id="chatResponse" class="chat-response"></div>
+            <div id="productGallery" class="product-gallery"></div>
+        </section>
+    </main>
+
+    <script src="script.js"></script>
+    <script>
+        // Initialize Lucide Icons
+        lucide.createIcons();
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>About | Al Statistics</title>
+    <link rel="stylesheet" href="style.css">
+    <!-- Modern Typography from Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap"
+        rel="stylesheet">
+    <!-- Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        .stats-container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: rgba(25, 25, 25, 0.6);
+            backdrop-filter: blur(16px);
+            border-radius: 24px;
+            padding: 40px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            text-align: center;
+        }
+
+        .chart-wrapper {
+            position: relative;
+            height: 400px;
+            width: 100%;
+            margin-top: 30px;
+        }
+
+        /* Responsive */
+        @media (min-width: 768px) {
+            .chart-wrapper {
+                height: 500px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="blob blob-1"></div>
+    <div class="blob blob-2"></div>
+
+    <main class="container">
+        <!-- Back Link -->
+        <a href="index.html" class="about-link"
+            style="position: absolute; top: 30px; left: 40px; font-weight: 600; text-decoration: none; color: rgba(255, 255, 255, 0.8); background: rgba(255, 255, 255, 0.1); padding: 8px 16px; border-radius: 20px; backdrop-filter: blur(10px); transition: 0.3s; z-index: 100; display: flex; align-items: center; gap: 8px;">
+            <i data-lucide="arrow-left" class="icon-small"></i> Back
+        </a>
+
+        <header class="hero">
+            <h1 class="logo">Catalog Statistics</h1>
+            <p class="subtitle">A complete breakdown of the products in Al's database.</p>
+        </header>
+
+        <section class="stats-container">
+            <h2 style="color: white; margin-bottom: 10px;">Category Distribution</h2>
+            <p style="color: rgba(255,255,255,0.6); font-size: 0.95rem;">Hover over the slices to view exact
+                percentages.</p>
+
+            <div id="loadingIndicator" class="loading-state">
+                <div class="spinner"></div>
+                <p>Loading database statistics...</p>
+            </div>
+
+            <div class="chart-wrapper">
+                <canvas id="categoryChart"></canvas>
+            </div>
+        </section>
+    </main>
+
+    <script src="statistics.js"></script>
+    <script>
+        lucide.createIcons();
+    </script>
+</body>
+
+</html>

@@ -11,9 +11,14 @@ An AI-powered multimodal shopping assistant for an electronics commerce website,
 | Feature | Example | How It Works |
 |---|---|---|
 | **General Conversation** | "What's your name?", "What can you do?" | Intent detection bypasses retrieval; LLM responds conversationally |
-| **Text-Based Recommendation** | "Recommend me wireless earbuds under $100" | MiniLM encoder → FAISS text index → LLM reasoning |
+| **Text-Based Recommendation** | "Recommend me wireless earbuds under $100" | MiniLM encoder → FAISS text index → Cross-Encoder re-rank → LLM reasoning |
 | **Image-Based Search** | Upload a photo of headphones | OpenCLIP encoder → FAISS visual index → Distractor Gate → LLM reasoning |
-| **Hybrid (Text + Image)** | Upload photo + "find me something like this but cheaper" | Both encoders → Reciprocal Rank Fusion → LLM reasoning |
+| **Hybrid (Text + Image)** | Upload photo + "find me something like this but cheaper" | Both encoders → Reciprocal Rank Fusion → Cross-Encoder re-rank → LLM reasoning |
+| **Dynamic Price Filtering** | "Laptops under $500" | Regex extracts price constraint → FAISS overfetch → numeric post-filter |
+| **Attribute Comparison** | "Which of these has the most storage?" | Metadata hints injected into RAG context → LLM performs MAX/MIN reasoning |
+| **Explainable AI Badges** | Product card shows "💰 Budget Pick" | LLM generates reasoning badges → backend parses JSON → frontend renders glassmorphic pills |
+| **Catalog Analytics** | Statistics dashboard | `/api/statistics` → Chart.js interactive pie chart |
+| **Search History** | Persistent query history panel | `localStorage`-based, per-user, survives page refresh |
 
 All use cases are served by a **single `/api/chat` endpoint** — no separate agents.
 
@@ -31,6 +36,10 @@ User Input (text / image / both)
            │ Product query
            ▼
 ┌─────────────────────────┐
+│  Dynamic Pre-Filter     │ ──── "under $100" → max_price = 100
+└──────────┬──────────────┘
+           ▼
+┌─────────────────────────┐
 │  Smart Router           │
 │ ┌─────────┬───────────┐ │
 │ │ MiniLM  │ OpenCLIP  │ │
@@ -41,7 +50,11 @@ User Input (text / image / both)
 │ text_catalog  catalog   │
 │   .index      .index    │
 └──────────┬──────────────┘
-           │ Late Fusion (RRF)
+           │ Late Fusion (RRF) + Price Filter
+           ▼
+┌─────────────────────────┐
+│  Cross-Encoder Re-Rank  │ ──── ms-marco-MiniLM-L-6-v2 (top 15 → top 5)
+└──────────┬──────────────┘
            ▼
 ┌─────────────────────────┐
 │  Category Safety Net    │ ──── Out-of-domain? ──→ Llama 3.2 Vision (OOD rejection)
@@ -49,7 +62,7 @@ User Input (text / image / both)
            │ Valid products
            ▼
 ┌─────────────────────────┐
-│  Llama 3.1 (Groq)       │ ──→ Generates recommendation + product IDs
+│  Llama 3.1 (Groq)       │ ──→ Generates recommendation + product IDs + XAI Badges
 └──────────┬──────────────┘
            │
            ▼
@@ -72,7 +85,8 @@ User Input (text / image / both)
 | **Text Embeddings** | SentenceTransformers (`all-MiniLM-L6-v2`) | Ultra-fast 384D encoding for sub-10ms text search |
 | **Visual Embeddings** | OpenCLIP (`ViT-B-16-SigLIP-256`) | State-of-the-art zero-shot image-text retrieval |
 | **Vector Search** | FAISS (dual-index) | In-memory local vector search, no cloud DB dependency |
-| **Environment** | python-dotenv | Secure API key management via `.env` |
+| **Re-Ranking** | CrossEncoder (`ms-marco-MiniLM-L-6-v2`) | Two-stage retrieve-and-rerank for precision without latency penalty |
+| **Environment** | python-dotenv | Secure API key management via `.env` with Docker quote sanitization |
 
 ### Why these choices?
 
@@ -137,6 +151,7 @@ cp .env.example .env
 # Edit .env and add your Groq API key:
 # GROQ_API_KEY=gsk_your_key_here
 ```
+Make sure to put you `api_key.env` inside the `backend` folder.
 
 ### 3. Prepare the Data (first time only)
 
@@ -207,6 +222,7 @@ The unified endpoint that handles all three use cases: general conversation, tex
 |---|---|---|---|
 | `message` | string | Yes | User's text query |
 | `image` | file | No | Product image (JPG, PNG, WebP, HEIC) |
+| `history_json` | string | No | JSON array of previous conversation turns (default: `"[]"`) |
 
 **Response (product recommendation):**
 
@@ -222,7 +238,8 @@ The unified endpoint that handles all three use cases: general conversation, tex
       "category": "Headphones",
       "price": "278.0",
       "image_url": "https://...",
-      "url": "https://..."
+      "url": "https://...",
+      "badge": "🏆 Top Choice"
     }
   ]
 }
@@ -264,13 +281,19 @@ The unified endpoint that handles all three use cases: general conversation, tex
 
 7. **Explainable AI (XAI) Badges:** To build user trust and transparency, the system instructs the LLM to generate a short reasoning badge (e.g., `✨ Visual Match`, `💰 Budget Pick`, `🏆 Top Choice`) for each recommended product. The backend extracts these via a robust regex parser with markdown-sanitization fallbacks (`json.loads` with backtick stripping), maps them to the product objects, and assigns a safe `🎯 Recommended` default if the LLM omits or malforms the JSON. The frontend renders these as glassmorphic pill overlays (`backdrop-filter: blur`) positioned absolutely on each product card image, giving users immediate visual insight into *why* the AI selected each item.
 
+8. **Dynamic Price Pre-Filtering:** Before any vector search occurs, a regex parser extracts price constraints from the user's natural language (e.g., "under $100", "cheaper than $50"). The extracted `max_price` is passed to the search engine, which uses an **overfetch-then-filter** paradigm: FAISS retrieves `k×10` candidates, then `_filter_and_rerank` numerically eliminates items exceeding the budget and slices the true top-K. This bolts hard metadata constraints onto a pure vector engine.
+
+9. **Attribute Extraction Hints:** To enable accurate product comparisons (e.g., "which has the most storage?"), the backend injects structured `HINT` lines into the RAG context string (e.g., `HINT: Result 1 has 12TB Storage`). This gives the 8B LLM explicit pre-extracted metadata to perform MAX/MIN reasoning without needing to parse raw product titles.
+
+10. **API Key Sanitization:** The Groq API key loader applies `.strip().strip('"').strip("'")` to handle edge cases where Docker `--env-file` passes literal quote characters around the key value, preventing silent `401 Unauthorized` failures in containerized deployments.
+
 ---
 
 ## Known Limitations
 
-- **Semantic Gap:** The reasoning model (Llama 3.1) cannot visually verify retrieval results. If OpenCLIP returns visually similar but semantically wrong items, the LLM may fabricate a rationale.
 - **Context Window:** Conversation history is capped at 5 turns (10 messages) to stay within token limits. Very long conversations will lose early context.
-- **Unweighted Late Fusion Conflicts:** When using hybrid search (image + text), the Reciprocal Rank Fusion (RRF) algorithm equally weights the visual index (OpenCLIP) and text index (MiniLM). If the inputs semantically clash (e.g., uploading a picture of a gaming mouse but asking "Show me mechanical keyboards"), the unweighted math can produce unexpected top-K results. A gaming mouse might score 10/10 visually and 5/10 textually (if the word "mechanical" appears in its switch description), causing it to mathematically outrank actual keyboards that scored 0/10 visually. While the reasoning LLM intelligently identifies and intercepts these contradictions for the user without hallucinating, a production-grade resolution would require dynamically weighting the RRF scores based on primary intent classification.
+- **Semantic Gap (Partially Mitigated):** The reasoning model (Llama 3.1) cannot visually verify retrieval results. However, the Cross-Encoder re-ranking stage (Design Decision #6) now deeply re-scores the top 15 FAISS candidates against the user's actual query before they reach the LLM, dramatically reducing semantically wrong items from slipping through. The remaining gap exists for **image-only queries**, which bypass the text-based Cross-Encoder entirely by design.
+- **Unweighted Late Fusion Conflicts (Partially Mitigated):** When using hybrid search (image + text), the RRF algorithm still equally weights both indexes. However, the Cross-Encoder now acts as a **second-pass semantic correction layer** after fusion — even if a gaming mouse initially outranks keyboards in the RRF math, the Cross-Encoder will re-score `["mechanical keyboards", "Razer Gaming Mouse"]` far lower than `["mechanical keyboards", "Corsair K70 Keyboard"]`, pushing correct items to the top. A production-grade resolution would still benefit from dynamically weighting the RRF scores based on primary intent classification.
 ---
 
 ## License

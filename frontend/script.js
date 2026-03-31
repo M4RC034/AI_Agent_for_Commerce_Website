@@ -258,8 +258,11 @@ document.addEventListener('DOMContentLoaded', () => {
                             priceDisp = `$${priceDisp}`;
                         }
 
+                        const badgeHTML = prod.badge ? `<div class="xai-badge">${prod.badge}</div>` : '';
+
                         card.innerHTML = `
                             <div class="product-img-wrapper">
+                                ${badgeHTML}
                                 <img src="${prod.image_url}" alt="${prod.title}" onerror="this.src='https://via.placeholder.com/200x200?text=No+Photo';">
                             </div>
                             <div class="product-info">

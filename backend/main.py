@@ -262,7 +262,10 @@ async def chat_endpoint(
             "2. Then ONLY list the relevant products that answer the user's specific query. Do NOT list, mention, or explain any products you ignored or found irrelevant.\n"
             "3. Explain why the relevant items match their request succinctly.\n"
             "4. VERY IMPORTANT: You must include the exact ID of the product (e.g., prod_10) in parentheses next to its name when you describe it.\n"
-            "5. TRUST THE CATEGORY: If the metadata says a product is in the 'Headphones' category, do not re-categorize it based on other keywords in the description (like 'battery' or 'cable')."
+            "5. TRUST THE CATEGORY: If the metadata says a product is in the 'Headphones' category, do not re-categorize it based on other keywords in the description (like 'battery' or 'cable').\n"
+            "6. ASSIGN BADGES: At the very end of your response, after any IDs arrays, you MUST provide a JSON dictionary mapping the chosen product IDs to a short 2-3 word reasoning badge with an emoji.\n"
+            "Format EXACTLY like this:\n"
+            "BADGES: {\"prod_1\": \"✨ Visual Match\", \"prod_2\": \"💰 Budget Pick\", \"prod_3\": \"🏆 Top Choice\"}"
         )
         
         user_prompt = f"User Message: {message}\n\n{context_str}"
@@ -306,8 +309,34 @@ async def chat_endpoint(
             # we return an empty list so the UI doesn't show hallucinated items.
             final_products = []
             
-        # Clean the response for the UI (Remove the IDs from the text if they were added at the end)
+        # --- XAI BADGE EXTRACTION ---
+        badges = {}
+        # Look for the BADGES: {...} block, making sure to grab multiline
+        badge_match = re.search(r'BADGES:\s*(\{.*?\})', agent_raw_reply, re.DOTALL | re.IGNORECASE)
+        if badge_match:
+            try:
+                # Clean out potential markdown backticks injected by the LLM
+                badges_json = badge_match.group(1).replace('```json', '').replace('```', '').strip()
+                raw_badges = json.loads(badges_json)
+                # Lowercase the keys to match safely
+                badges = {str(k).lower(): v for k, v in raw_badges.items()}
+            except json.JSONDecodeError:
+                print("Failed to parse badges JSON:", badge_match.group(1))
+
+        # Map badges to the final products
+        for p in final_products:
+            pid = str(p.get('product_id', '')).lower()
+            if pid in badges:
+                p['badge'] = badges[pid]
+            else:
+                p['badge'] = "🎯 Recommended"
+
+        # Clean the response for the UI (Remove IDs and BADGES blocks)
         clean_reply = re.sub(r'IDs?:\s*\[.*?\]', '', agent_raw_reply, flags=re.IGNORECASE).strip()
+        clean_reply = re.sub(r'BADGES:\s*\{.*?\}', '', clean_reply, flags=re.IGNORECASE | re.DOTALL).strip()
+        
+        # Strip trailing stray backticks cleanly caused by stripping JSON
+        clean_reply = re.sub(r'```json\s*$', '', clean_reply).replace('```', '').strip()
         
         if "</think>" in clean_reply:
             clean_reply = clean_reply.split("</think>")[-1].strip()
@@ -383,6 +412,8 @@ async def _handle_general_conversation(message: str, history: list = None) -> di
         "If asked about your identity, underlying AI model, or how you differ from other AIs, explicitly explain that you are 'Al', "
         "a specialized multimodal RAG shopping interface designed natively for this commerce catalog. You blend visual vector search "
         "and semantic text retrieval, rather than just being a general conversational chatbot.\n\n"
+        "IMPORTANT: Do NOT start your response with 'According to the information you provide' — that phrasing is reserved for product search results only. "
+        "Just respond naturally and conversationally.\n\n"
         "Keep responses short (2-4 sentences). Be personable but professional."
     )
 

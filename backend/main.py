@@ -299,11 +299,16 @@ _GENERAL_PATTERNS = [
     r"\b(how are you)\b",
     r"\b(tell me about yourself)\b",
     r"\b(what are you)\b",
-    r"\b(what do you sell|what do you have)\b",
     r"\b(help me|what do you offer)\b",
     r"\b(hello|hi|hey|good morning|good afternoon|good evening|good night)\b",
     r"\b(thank(?:s| you))\b",
     r"\b(bye|goodbye|see you)\b",
+    r"\b(difference between you)\b",
+    r"\b(other ai models?)\b",
+    r"\b(how do you work)\b",
+    r"\b(who made you|who created you)\b",
+    r"\b(are you an ai|are you a bot)\b",
+    r"\b(what model)\b"
 ]
 _GENERAL_RE = re.compile("|".join(_GENERAL_PATTERNS), re.IGNORECASE)
 
@@ -343,6 +348,9 @@ async def _handle_general_conversation(message: str, history: list = None) -> di
         "in text, or by uploading a photo of a product they want to find.\n\n"
         "CRITICAL INSTRUCTION: If the user asks 'what do you sell', 'what do you have', or similar inventory questions, "
         "you MUST explicitly answer: 'We mainly focus on electronics. Please check the \"About\" section to see what kinds of items we have.'\n\n"
+        "If asked about your identity, underlying AI model, or how you differ from other AIs, explicitly explain that you are 'Al', "
+        "a specialized multimodal RAG shopping interface designed natively for this commerce catalog. You blend visual vector search "
+        "and semantic text retrieval, rather than just being a general conversational chatbot.\n\n"
         "Keep responses short (2-4 sentences). Be personable but professional."
     )
 

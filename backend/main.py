@@ -9,6 +9,7 @@ from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from PIL import Image
+from sentence_transformers import CrossEncoder
 
 # Automatically load API keys from .env or api_key.env
 import base64
@@ -51,10 +52,11 @@ app.add_middleware(
 # Global variables to hold singletons
 search_engine = None
 groq_client = None
+cross_encoder = None
 
 @app.on_event("startup")
 def startup_event():
-    global search_engine, groq_client
+    global search_engine, groq_client, cross_encoder
     
     # Load paths based on expected directory structure
     BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -72,6 +74,14 @@ def startup_event():
         groq_client = Groq(api_key=groq_api_key)
     else:
         print("WARNING: GROQ_API_KEY environment variable not set. LLM inference will fail.")
+
+    # --- Load Cross-Encoder for Re-ranking ---
+    try:
+        print("Loading Cross-Encoder model...")
+        cross_encoder = CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2', device='cpu')
+        print("Cross-Encoder loaded successfully!")
+    except Exception as e:
+        print(f"WARNING: Failed to load Cross-Encoder: {e}")
 
 @app.get("/api/health")
 def health_check():
@@ -128,21 +138,43 @@ async def chat_endpoint(
             if price_match:
                 max_price = float(price_match.group(1))
         
+        # --- 1. Broad Vector Retrieval (k=15) ---
         if image and message and not is_default_msg:
-            # Both provided -> Late Fusion Hybrid Search
+            # Late Fusion: Fetch top 15
             image_bytes = await image.read()
             pil_img = Image.open(io.BytesIO(image_bytes)).convert('RGB')
-            context_items = search_engine.hybrid_search(message, pil_img, k=5, max_price=max_price)
+            context_items = search_engine.hybrid_search(message, pil_img, k=15, max_price=max_price)
             
         elif image:
-            # Only Image provided -> OpenCLIP
+            # Image Only: Cross-Encoder doesn't work on images, so we just stick to k=5 vector matches
             image_bytes = await image.read()
             pil_img = Image.open(io.BytesIO(image_bytes)).convert('RGB')
             context_items = search_engine.search_by_image(pil_img, k=5, max_price=max_price)
             
         else:
-            # Only Text provided -> MiniLM
-            context_items = search_engine.search_by_text(message, k=5, max_price=max_price)
+            # Text Only: Fetch top 15
+            context_items = search_engine.search_by_text(message, k=15, max_price=max_price)
+            
+        # --- 2. Cross-Encoder Re-Ranking ---
+        # Only re-rank if we have text to compare against and we retrieved more than 5 items
+        if message and not is_default_msg and cross_encoder and len(context_items) > 5:
+            # Create a list of pairs: [User Query, Document Text] giving maximum context
+            cross_inp = [
+                [message, f"{item.get('title', '')} {item.get('category', '')}"] 
+                for item in context_items
+            ]
+            
+            # Predict scores for all pairs
+            cross_scores = cross_encoder.predict(cross_inp)
+            
+            # Combine items with their new scores
+            scored_items = list(zip(context_items, cross_scores))
+            
+            # Sort by the Cross-Encoder score (highest to lowest)
+            scored_items.sort(key=lambda x: x[1], reverse=True)
+            
+            # Keep only the Top 5 after re-ranking
+            context_items = [item for item, score in scored_items[:5]]
             
         # Format the FAISS results to feed to the "Brain"
         valid_cats = [

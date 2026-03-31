@@ -155,6 +155,8 @@ Make sure to put you `api_key.env` inside the `backend` folder.
 
 ### 3. Prepare the Data (first time only)
 
+Download the [Amazon Products Sales Dataset 42K+ Items - 2025](https://www.kaggle.com/datasets/ikramshah512/amazon-products-sales-dataset-42k-items-2025) and place the `amazon_products_sales_data_uncleaned.csv` file in the `data/raw/` folder.
+
 ```bash
 # Clean the raw Amazon CSV
 python src/data_preprocess/data_cleaning.py
@@ -176,6 +178,37 @@ docker build -t al-agent .
 docker run -p 8000:8000 --env-file backend/api_key.env al-agent
 ```
 Then go to http://localhost:8000 in your browser.
+---
+
+## Key Design Decisions
+
+1. **Intent Detection Gate:** Conversational queries (greetings, identity questions) bypass the retrieval pipeline entirely and go straight to the LLM. Product signals (keywords like "recommend", "laptop") override greeting patterns, so "Hi, find me a laptop" still routes to product search.
+
+2. **Distractor Gate over Category Matching:** Instead of demanding exact category string matches between OpenCLIP labels and catalog labels (which caused false negatives), a binary distractor gate rejects clearly non-electronic images and lets FAISS return the closest visual neighbors for everything else.
+
+3. **Intent-Product Alignment Layer:** The LLM emits hidden product IDs at the end of its response. A regex parser extracts these and filters the product array so the frontend gallery shows only items the LLM actually endorsed.
+
+4. **Cloud Vision Fallback (Selective):** Llama 3.2 Vision is called only when local retrieval fails (zero valid products), keeping the happy path fast.
+
+5. **Client-Side Conversation History:** Multi-turn context is maintained in the browser (no server-side storage or database needed). The frontend sends the last 5 turns as a JSON array with each request, and the backend injects them into the Groq message array. This enables follow-ups like "show me a cheaper one" while keeping the architecture stateless and deployment-simple.
+
+6. **Two-Stage Retrieve and Re-Rank Pipeline:** To solve the inherent precision issues of Bi-encoder vector search without destroying responsiveness, the architecture uses a two-stage pattern. Phase 1 leverages FAISS and MiniLM for fast, high-recall retrieval (casting a wider net of `k=15` candidates). Phase 2 uses a Cross-Encoder (`ms-marco-MiniLM-L-6-v2`) to perform deep semantic re-ranking, efficiently recalculating the relevance permutations of the user's query against the product titles to accurately slice the top 5. This dramatically bridges the 'Semantic Gap'. A strict **Visual Safety Net** prevents purely visual OpenCLIP queries from hitting the text-based Cross-Encoder, actively balancing computational latency against maximum precision.
+
+7. **Explainable AI (XAI) Badges:** To build user trust and transparency, the system instructs the LLM to generate a short reasoning badge (e.g., `✨ Visual Match`, `💰 Budget Pick`, `🏆 Top Choice`) for each recommended product. The backend extracts these via a robust regex parser with markdown-sanitization fallbacks (`json.loads` with backtick stripping), maps them to the product objects, and assigns a safe `🎯 Recommended` default if the LLM omits or malforms the JSON. The frontend renders these as glassmorphic pill overlays (`backdrop-filter: blur`) positioned absolutely on each product card image, giving users immediate visual insight into *why* the AI selected each item.
+
+8. **Dynamic Price Pre-Filtering:** Before any vector search occurs, a regex parser extracts price constraints from the user's natural language (e.g., "under $100", "cheaper than $50"). The extracted `max_price` is passed to the search engine, which uses an **overfetch-then-filter** paradigm: FAISS retrieves `k×10` candidates, then `_filter_and_rerank` numerically eliminates items exceeding the budget and slices the true top-K. This bolts hard metadata constraints onto a pure vector engine.
+
+9. **Attribute Extraction Hints:** To enable accurate product comparisons (e.g., "which has the most storage?"), the backend injects structured `HINT` lines into the RAG context string (e.g., `HINT: Result 1 has 12TB Storage`). This gives the 8B LLM explicit pre-extracted metadata to perform MAX/MIN reasoning without needing to parse raw product titles.
+
+10. **API Key Sanitization:** The Groq API key loader applies `.strip().strip('"').strip("'")` to handle edge cases where Docker `--env-file` passes literal quote characters around the key value, preventing silent `401 Unauthorized` failures in containerized deployments.
+
+---
+
+## Known Limitations
+
+- **Context Window:** Conversation history is capped at 5 turns (10 messages) to stay within token limits. Very long conversations will lose early context.
+- **Semantic Gap (Partially Mitigated):** The reasoning model (Llama 3.1) cannot visually verify retrieval results. However, the Cross-Encoder re-ranking stage (Design Decision #6) now deeply re-scores the top 15 FAISS candidates against the user's actual query before they reach the LLM, dramatically reducing semantically wrong items from slipping through. The remaining gap exists for **image-only queries**, which bypass the text-based Cross-Encoder entirely by design.
+- **Unweighted Late Fusion Conflicts (Partially Mitigated):** When using hybrid search (image + text), the RRF algorithm still equally weights both indexes. However, the Cross-Encoder now acts as a **second-pass semantic correction layer** after fusion — even if a gaming mouse initially outranks keyboards in the RRF math, the Cross-Encoder will re-score `["mechanical keyboards", "Razer Gaming Mouse"]` far lower than `["mechanical keyboards", "Corsair K70 Keyboard"]`, pushing correct items to the top. A production-grade resolution would still benefit from dynamically weighting the RRF scores based on primary intent classification.
 ---
 
 ## API Documentation
@@ -263,37 +296,6 @@ The unified endpoint that handles all three use cases: general conversation, tex
 }
 ```
 
----
-
-## Key Design Decisions
-
-1. **Intent Detection Gate:** Conversational queries (greetings, identity questions) bypass the retrieval pipeline entirely and go straight to the LLM. Product signals (keywords like "recommend", "laptop") override greeting patterns, so "Hi, find me a laptop" still routes to product search.
-
-2. **Distractor Gate over Category Matching:** Instead of demanding exact category string matches between OpenCLIP labels and catalog labels (which caused false negatives), a binary distractor gate rejects clearly non-electronic images and lets FAISS return the closest visual neighbors for everything else.
-
-3. **Intent-Product Alignment Layer:** The LLM emits hidden product IDs at the end of its response. A regex parser extracts these and filters the product array so the frontend gallery shows only items the LLM actually endorsed.
-
-4. **Cloud Vision Fallback (Selective):** Llama 3.2 Vision is called only when local retrieval fails (zero valid products), keeping the happy path fast.
-
-5. **Client-Side Conversation History:** Multi-turn context is maintained in the browser (no server-side storage or database needed). The frontend sends the last 5 turns as a JSON array with each request, and the backend injects them into the Groq message array. This enables follow-ups like "show me a cheaper one" while keeping the architecture stateless and deployment-simple.
-
-6. **Two-Stage Retrieve and Re-Rank Pipeline:** To solve the inherent precision issues of Bi-encoder vector search without destroying responsiveness, the architecture uses a two-stage pattern. Phase 1 leverages FAISS and MiniLM for fast, high-recall retrieval (casting a wider net of `k=15` candidates). Phase 2 uses a Cross-Encoder (`ms-marco-MiniLM-L-6-v2`) to perform deep semantic re-ranking, efficiently recalculating the relevance permutations of the user's query against the product titles to accurately slice the top 5. This dramatically bridges the 'Semantic Gap'. A strict **Visual Safety Net** prevents purely visual OpenCLIP queries from hitting the text-based Cross-Encoder, actively balancing computational latency against maximum precision.
-
-7. **Explainable AI (XAI) Badges:** To build user trust and transparency, the system instructs the LLM to generate a short reasoning badge (e.g., `✨ Visual Match`, `💰 Budget Pick`, `🏆 Top Choice`) for each recommended product. The backend extracts these via a robust regex parser with markdown-sanitization fallbacks (`json.loads` with backtick stripping), maps them to the product objects, and assigns a safe `🎯 Recommended` default if the LLM omits or malforms the JSON. The frontend renders these as glassmorphic pill overlays (`backdrop-filter: blur`) positioned absolutely on each product card image, giving users immediate visual insight into *why* the AI selected each item.
-
-8. **Dynamic Price Pre-Filtering:** Before any vector search occurs, a regex parser extracts price constraints from the user's natural language (e.g., "under $100", "cheaper than $50"). The extracted `max_price` is passed to the search engine, which uses an **overfetch-then-filter** paradigm: FAISS retrieves `k×10` candidates, then `_filter_and_rerank` numerically eliminates items exceeding the budget and slices the true top-K. This bolts hard metadata constraints onto a pure vector engine.
-
-9. **Attribute Extraction Hints:** To enable accurate product comparisons (e.g., "which has the most storage?"), the backend injects structured `HINT` lines into the RAG context string (e.g., `HINT: Result 1 has 12TB Storage`). This gives the 8B LLM explicit pre-extracted metadata to perform MAX/MIN reasoning without needing to parse raw product titles.
-
-10. **API Key Sanitization:** The Groq API key loader applies `.strip().strip('"').strip("'")` to handle edge cases where Docker `--env-file` passes literal quote characters around the key value, preventing silent `401 Unauthorized` failures in containerized deployments.
-
----
-
-## Known Limitations
-
-- **Context Window:** Conversation history is capped at 5 turns (10 messages) to stay within token limits. Very long conversations will lose early context.
-- **Semantic Gap (Partially Mitigated):** The reasoning model (Llama 3.1) cannot visually verify retrieval results. However, the Cross-Encoder re-ranking stage (Design Decision #6) now deeply re-scores the top 15 FAISS candidates against the user's actual query before they reach the LLM, dramatically reducing semantically wrong items from slipping through. The remaining gap exists for **image-only queries**, which bypass the text-based Cross-Encoder entirely by design.
-- **Unweighted Late Fusion Conflicts (Partially Mitigated):** When using hybrid search (image + text), the RRF algorithm still equally weights both indexes. However, the Cross-Encoder now acts as a **second-pass semantic correction layer** after fusion — even if a gaming mouse initially outranks keyboards in the RRF math, the Cross-Encoder will re-score `["mechanical keyboards", "Razer Gaming Mouse"]` far lower than `["mechanical keyboards", "Corsair K70 Keyboard"]`, pushing correct items to the top. A production-grade resolution would still benefit from dynamically weighting the RRF scores based on primary intent classification.
 ---
 
 ## License

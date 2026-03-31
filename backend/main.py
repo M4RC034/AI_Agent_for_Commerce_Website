@@ -369,7 +369,8 @@ _GENERAL_PATTERNS = [
     r"\b(how do you work)\b",
     r"\b(who made you|who created you)\b",
     r"\b(are you an ai|are you a bot)\b",
-    r"\b(what model)\b"
+    r"\b(what model)\b",
+    r"\b(what do you sell)\b"
 ]
 _GENERAL_RE = re.compile("|".join(_GENERAL_PATTERNS), re.IGNORECASE)
 

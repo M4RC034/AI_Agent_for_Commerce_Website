@@ -16,29 +16,169 @@
     <!-- Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        .stats-container {
-            max-width: 800px;
+        /* ── Two-column layout ── */
+        .about-layout {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+            gap: 28px;
+            align-items: start;
+            max-width: 1200px;
             margin: 0 auto;
-            background: rgba(25, 25, 25, 0.6);
-            backdrop-filter: blur(16px);
+        }
+
+        @media (max-width: 880px) {
+            .about-layout {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* ── Shared glass card ── */
+        .glass-card {
+            background: rgba(25, 25, 35, 0.65);
+            backdrop-filter: blur(18px);
+            -webkit-backdrop-filter: blur(18px);
             border-radius: 24px;
-            padding: 40px;
-            border: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 36px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        /* ── Stats (left) ── */
+        .stats-card {
             text-align: center;
         }
 
         .chart-wrapper {
             position: relative;
-            height: 400px;
+            height: 380px;
             width: 100%;
-            margin-top: 30px;
+            margin-top: 24px;
         }
 
-        /* Responsive */
         @media (min-width: 768px) {
             .chart-wrapper {
-                height: 500px;
+                height: 420px;
             }
+        }
+
+        /* ── About (right) ── */
+        .about-card h2 {
+            color: #fff;
+            font-size: 1.6rem;
+            font-weight: 700;
+            margin: 0 0 6px 0;
+            letter-spacing: -0.3px;
+        }
+
+        .about-card .about-tagline {
+            font-size: 0.88rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1.2px;
+            color: var(--accent, #7c6af7);
+            margin: 0 0 20px 0;
+        }
+
+        .about-card .about-intro {
+            color: rgba(255, 255, 255, 0.72);
+            font-size: 0.97rem;
+            line-height: 1.75;
+            margin: 0 0 28px 0;
+        }
+
+        .about-card .about-intro a {
+            color: var(--accent, #7c6af7);
+            text-decoration: none;
+            border-bottom: 1px solid rgba(124, 106, 247, 0.35);
+            transition: border-color 0.2s;
+        }
+
+        .about-card .about-intro a:hover {
+            border-color: var(--accent, #7c6af7);
+        }
+
+        /* ── Feature pills ── */
+        .feature-grid {
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            margin-bottom: 32px;
+        }
+
+        .feature-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 14px;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.07);
+            border-radius: 14px;
+            padding: 14px 16px;
+            transition: background 0.2s, border-color 0.2s;
+        }
+
+        .feature-item:hover {
+            background: rgba(124, 106, 247, 0.08);
+            border-color: rgba(124, 106, 247, 0.25);
+        }
+
+        .feature-icon {
+            font-size: 1.35rem;
+            line-height: 1;
+            flex-shrink: 0;
+            margin-top: 2px;
+        }
+
+        .feature-text strong {
+            display: block;
+            color: #fff;
+            font-size: 0.92rem;
+            font-weight: 600;
+            margin-bottom: 2px;
+        }
+
+        .feature-text span {
+            color: rgba(255, 255, 255, 0.55);
+            font-size: 0.83rem;
+            line-height: 1.5;
+        }
+
+        /* ── Tech stack badges ── */
+        .stack-label {
+            font-size: 0.78rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: rgba(255, 255, 255, 0.4);
+            margin-bottom: 10px;
+        }
+
+        .stack-badges {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .stack-badge {
+            font-size: 0.78rem;
+            font-weight: 500;
+            padding: 5px 12px;
+            border-radius: 20px;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: rgba(255, 255, 255, 0.65);
+        }
+
+        /* ── Section card title ── */
+        .card-section-title {
+            color: white;
+            font-size: 1.15rem;
+            font-weight: 600;
+            margin: 0 0 6px 0;
+        }
+
+        .card-section-sub {
+            color: rgba(255, 255, 255, 0.5);
+            font-size: 0.88rem;
+            margin: 0 0 4px 0;
         }
     </style>
 </head>
@@ -55,24 +195,93 @@
         </a>
 
         <header class="hero">
-            <h1 class="logo">Catalog Statistics</h1>
-            <p class="subtitle">A complete breakdown of the products in Al's database.</p>
+            <h1 class="logo">About Al</h1>
+            <p class="subtitle">Catalog analytics and architecture overview.</p>
         </header>
 
-        <section class="stats-container">
-            <h2 style="color: white; margin-bottom: 10px;">Category Distribution</h2>
-            <p style="color: rgba(255,255,255,0.6); font-size: 0.95rem;">Hover over the slices to view exact
-                percentages.</p>
+        <div class="about-layout">
 
-            <div id="loadingIndicator" class="loading-state">
-                <div class="spinner"></div>
-                <p>Loading database statistics...</p>
-            </div>
+            <!-- LEFT — Catalog Statistics -->
+            <section class="glass-card stats-card">
+                <p class="card-section-title">Category Distribution</p>
+                <p class="card-section-sub">Hover over the slices to view exact percentages.</p>
 
-            <div class="chart-wrapper">
-                <canvas id="categoryChart"></canvas>
-            </div>
-        </section>
+                <div id="loadingIndicator" class="loading-state">
+                    <div class="spinner"></div>
+                    <p>Loading database statistics...</p>
+                </div>
+
+                <div class="chart-wrapper">
+                    <canvas id="categoryChart"></canvas>
+                </div>
+            </section>
+
+            <!-- RIGHT — About Al -->
+            <section class="glass-card about-card">
+                <p class="about-tagline">AI Commerce Agent</p>
+                <h2>About Al</h2>
+
+                <p class="about-intro">
+                    An AI-powered multimodal shopping assistant for an electronics commerce website, inspired by
+                    <a href="https://www.aboutamazon.com/news/retail/amazon-rufus" target="_blank" rel="noopener noreferrer">Amazon Rufus</a>.
+                    A single unified agent handles <strong style="color: rgba(255,255,255,0.9);">general conversation</strong>,
+                    <strong style="color: rgba(255,255,255,0.9);">text-based product recommendations</strong>, and
+                    <strong style="color: rgba(255,255,255,0.9);">image-based product search</strong> — all within one endpoint.
+                </p>
+
+                <div class="feature-grid">
+                    <div class="feature-item">
+                        <span class="feature-icon">💬</span>
+                        <div class="feature-text">
+                            <strong>General Conversation</strong>
+                            <span>Ask greetings, product questions, or anything about Al — intent routing directs it away from the search pipeline.</span>
+                        </div>
+                    </div>
+                    <div class="feature-item">
+                        <span class="feature-icon">🔍</span>
+                        <div class="feature-text">
+                            <strong>Text-Based Semantic Search</strong>
+                            <span>MiniLM encodes your query into 384D vectors, retrieved via FAISS and precision re-ranked by a Cross-Encoder.</span>
+                        </div>
+                    </div>
+                    <div class="feature-item">
+                        <span class="feature-icon">🖼️</span>
+                        <div class="feature-text">
+                            <strong>Visual Product Search</strong>
+                            <span>Upload a photo — OpenCLIP encodes it into 768D visual features and finds the closest products in the catalog.</span>
+                        </div>
+                    </div>
+                    <div class="feature-item">
+                        <span class="feature-icon">⚡</span>
+                        <div class="feature-text">
+                            <strong>Hybrid Late Fusion (RRF)</strong>
+                            <span>Combine image + text inputs. Both indexes are queried and fused via Reciprocal Rank Fusion for the best results.</span>
+                        </div>
+                    </div>
+                    <div class="feature-item">
+                        <span class="feature-icon">✨</span>
+                        <div class="feature-text">
+                            <strong>Explainable AI Badges</strong>
+                            <span>Every product card displays a reasoning badge generated by the LLM — so you always know <em>why</em> it was recommended.</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div>
+                    <p class="stack-label">Powered by</p>
+                    <div class="stack-badges">
+                        <span class="stack-badge">Llama 3.1 (Groq)</span>
+                        <span class="stack-badge">OpenCLIP ViT-B-16</span>
+                        <span class="stack-badge">MiniLM-L6-v2</span>
+                        <span class="stack-badge">FAISS Dual-Index</span>
+                        <span class="stack-badge">Cross-Encoder</span>
+                        <span class="stack-badge">FastAPI</span>
+                        <span class="stack-badge">Llama 3.2 Vision</span>
+                    </div>
+                </div>
+            </section>
+
+        </div><!-- end .about-layout -->
     </main>
 
     <script src="statistics.js"></script>

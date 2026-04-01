@@ -1,4 +1,20 @@
 document.addEventListener('DOMContentLoaded', () => {
+    // HTML escape helper to prevent XSS from catalog data or LLM responses
+    function escapeHTML(str) {
+        const div = document.createElement('div');
+        div.appendChild(document.createTextNode(str));
+        return div.innerHTML;
+    }
+
+    // Sanitize URLs — only allow http/https protocols
+    function sanitizeURL(url) {
+        try {
+            const parsed = new URL(url);
+            if (parsed.protocol === 'http:' || parsed.protocol === 'https:') return url;
+        } catch {}
+        return '#';
+    }
+
     // Time-aware greeting logic
     const greetingLogo = document.getElementById('greetingLogo');
     if (greetingLogo) {
@@ -81,9 +97,11 @@ document.addEventListener('DOMContentLoaded', () => {
             li.className = 'history-item';
             li.innerHTML = `
                 <i data-lucide="search" class="history-icon" style="width:14px;height:14px;"></i>
-                <span class="history-text">${item.query}</span>
+                <span class="history-text"></span>
                 <span class="history-time">${formatTimeAgo(item.timestamp)}</span>
             `;
+            // Set query text safely via textContent to prevent XSS
+            li.querySelector('.history-text').textContent = item.query;
             li.addEventListener('click', () => {
                 textInput.value = item.query;
                 historyPanel.classList.add('hidden');
@@ -234,7 +252,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
             loadingIndicator.classList.add('hidden');
 
-            chatResponse.innerHTML = `<p>${data.agent_response.replace(/\n/g, '<br>')}</p>`;
+            // Escape the response then convert newlines to <br> for display
+            const safeResponse = escapeHTML(data.agent_response).replace(/\n/g, '<br>');
+            chatResponse.innerHTML = safeResponse ? `<p>${safeResponse}</p>` : '';
 
             // Update multi-turn conversation history
             conversationHistory.push({ role: 'user', content: sentMessage });
@@ -247,7 +267,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (data.products && data.products.length > 0) {
                 const firstProd = data.products[0];
                 if (firstProd.product_id === 'NONE') {
-                    chatResponse.innerHTML += `<br><p class="error-msg">⚠️ ${firstProd.description}</p>`;
+                    chatResponse.innerHTML += `<br><p class="error-msg">⚠️ ${escapeHTML(firstProd.description || '')}</p>`;
                 } else {
                     data.products.forEach((prod) => {
                         const card = document.createElement('div');
@@ -258,18 +278,23 @@ document.addEventListener('DOMContentLoaded', () => {
                             priceDisp = `$${priceDisp}`;
                         }
 
-                        const badgeHTML = prod.badge ? `<div class="xai-badge">${prod.badge}</div>` : '';
+                        const safeTitle = escapeHTML(prod.title || '');
+                        const safeCategory = escapeHTML(prod.category || '');
+                        const safePrice = escapeHTML(priceDisp);
+                        const safeImageUrl = sanitizeURL(prod.image_url || '');
+                        const safeUrl = sanitizeURL(prod.url || '');
+                        const badgeHTML = prod.badge ? `<div class="xai-badge">${escapeHTML(prod.badge)}</div>` : '';
 
                         card.innerHTML = `
                             <div class="product-img-wrapper">
                                 ${badgeHTML}
-                                <img src="${prod.image_url}" alt="${prod.title}" onerror="this.src='https://via.placeholder.com/200x200?text=No+Photo';">
+                                <img src="${safeImageUrl}" alt="${safeTitle}" onerror="this.src='https://via.placeholder.com/200x200?text=No+Photo';">
                             </div>
                             <div class="product-info">
-                                <span class="product-category">${prod.category}</span>
-                                <h3 class="product-title" title="${prod.title}">${prod.title}</h3>
-                                <span class="product-price">${priceDisp}</span>
-                                <a href="${prod.url}" target="_blank" class="buy-btn">View on Amazon</a>
+                                <span class="product-category">${safeCategory}</span>
+                                <h3 class="product-title" title="${safeTitle}">${safeTitle}</h3>
+                                <span class="product-price">${safePrice}</span>
+                                <a href="${safeUrl}" target="_blank" rel="noopener noreferrer" class="buy-btn">View on Amazon</a>
                             </div>
                         `;
                         productGallery.appendChild(card);
@@ -282,5 +307,12 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         textInput.value = '';
+
+        // Clear attached image so it isn't silently re-sent on the next query
+        currentFile = null;
+        imageUpload.value = '';
+        imagePreviewContainer.classList.add('hidden');
+        imagePreview.src = '';
+        textInput.placeholder = "Ask Al anything, or upload a photo to find products...";
     });
 });

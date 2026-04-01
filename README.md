@@ -6,6 +6,8 @@ An AI-powered multimodal shopping assistant for an electronics commerce website,
 
 🚀 **Live Demo:** [huggingface.co/spaces/Marc034/al-commerce-agent](https://huggingface.co/spaces/Marc034/al-commerce-agent)
 
+✅ **All 16 test cases passed** — see [`documentation/test_case.md`](documentation/test_case.md) for the full test suite.
+
 ---
 
 ## Features

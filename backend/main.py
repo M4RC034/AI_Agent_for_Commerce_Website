@@ -57,9 +57,8 @@ cross_encoder = None
 @app.on_event("startup")
 def startup_event():
     global search_engine, groq_client, cross_encoder
-    
+
     # Load paths based on expected directory structure
-    BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     index_path = os.path.join(BASE_DIR, "data", "processed", "catalog.index")
     catalog_path = os.path.join(BASE_DIR, "data", "processed", "cleaned_catalog_with_images.jsonl")
     
@@ -113,8 +112,8 @@ async def chat_endpoint(
     # Parse conversation history (sent as JSON string via FormData)
     try:
         history = json.loads(history_json)
-        # Keep only the last 5 turns to stay within token limits
-        history = history[-5:]
+        # Keep only the last 5 turns (10 messages) to stay within token limits
+        history = history[-10:]
     except (json.JSONDecodeError, TypeError):
         history = []
         
@@ -128,7 +127,14 @@ async def chat_endpoint(
         
         context_items = []
         is_default_msg = message == "Please find items visually similar to this image."
-        
+
+        # --- Read image bytes once if present ---
+        image_bytes = None
+        pil_img = None
+        if image:
+            image_bytes = await image.read()
+            pil_img = Image.open(io.BytesIO(image_bytes)).convert('RGB')
+
         # --- Metadata Pre-Filtering ---
         # Extract dynamic constraints (like max price) before searching
         max_price = None
@@ -137,20 +143,16 @@ async def chat_endpoint(
             price_match = re.search(r'(?:under|below|less than|cheaper than)\s*\$?\s*(\d+(?:\.\d{1,2})?)', message, re.IGNORECASE)
             if price_match:
                 max_price = float(price_match.group(1))
-        
+
         # --- 1. Broad Vector Retrieval (k=15) ---
         if image and message and not is_default_msg:
             # Late Fusion: Fetch top 15
-            image_bytes = await image.read()
-            pil_img = Image.open(io.BytesIO(image_bytes)).convert('RGB')
             context_items = search_engine.hybrid_search(message, pil_img, k=15, max_price=max_price)
-            
+
         elif image:
             # Image Only: Cross-Encoder doesn't work on images, so we just stick to k=5 vector matches
-            image_bytes = await image.read()
-            pil_img = Image.open(io.BytesIO(image_bytes)).convert('RGB')
             context_items = search_engine.search_by_image(pil_img, k=5, max_price=max_price)
-            
+
         else:
             # Text Only: Fetch top 15
             context_items = search_engine.search_by_text(message, k=15, max_price=max_price)
@@ -178,10 +180,11 @@ async def chat_endpoint(
             
         # Format the FAISS results to feed to the "Brain"
         valid_cats = [
-            'Laptops', 'Phones', 'Headphones', 'Chargers & Cables', 'Cameras', 
-            'Storage', 'Smart Home', 'TV & Display', 'Power & Batteries', 
+            'Laptops', 'Phones', 'Headphones', 'Chargers & Cables', 'Cameras',
+            'Storage', 'Smart Home', 'TV & Display', 'Power & Batteries',
             'Networking', 'Wearables', 'Speakers', 'Printers & Scanners', 'Gaming',
-            'Computers & Accessories', 'Computer Accessories & Peripherals', 'Monitors'
+            'Computers & Accessories', 'Computer Accessories & Peripherals', 'Monitors',
+            'Other Electronics'
         ]
 
         context_str = "VISUAL/METADATA RAG SEARCH RESULTS:\n\n"
@@ -208,8 +211,6 @@ async def chat_endpoint(
             if image:
                 image_description = "this item"
                 try:
-                    image.file.seek(0)
-                    image_bytes = await image.read()
                     base64_image = base64.b64encode(image_bytes).decode('utf-8')
                     
                     vision_completion = groq_client.chat.completions.create(
@@ -265,7 +266,12 @@ async def chat_endpoint(
             "5. TRUST THE CATEGORY: If the metadata says a product is in the 'Headphones' category, do not re-categorize it based on other keywords in the description (like 'battery' or 'cable').\n"
             "6. ASSIGN BADGES: At the very end of your response, after any IDs arrays, you MUST provide a JSON dictionary mapping the chosen product IDs to a short 2-3 word reasoning badge with an emoji.\n"
             "Format EXACTLY like this:\n"
-            "BADGES: {\"prod_1\": \"✨ Visual Match\", \"prod_2\": \"💰 Budget Pick\", \"prod_3\": \"🏆 Top Choice\"}"
+            "BADGES: {\"prod_1\": \"✨ Visual Match\", \"prod_2\": \"💰 Budget Pick\", \"prod_3\": \"🏆 Top Choice\"}\n"
+            "7. OOD GUARDRAIL: If the user's prompt is conversational, non-sensical, or completely unrelated to shopping "
+            "(e.g., 'I love you', 'tell me a joke', 'how do I cook'), you MUST IGNORE the retrieved products. "
+            "Do not recommend anything. Instead, reply exactly with: "
+            "'I'm sorry, but I cannot help you with this task. I am an AI shopping assistant specialized in electronics.' "
+            "and return an empty BADGES JSON."
         )
         
         user_prompt = f"User Message: {message}\n\n{context_str}"
@@ -378,7 +384,8 @@ _GENERAL_RE = re.compile("|".join(_GENERAL_PATTERNS), re.IGNORECASE)
 # even if it also matches a greeting (e.g. "hi, recommend me headphones").
 _PRODUCT_SIGNALS = [
     r"\b(recommend|suggest|find|search|show|looking for|need|want|buy|compare)\b",
-    r"\b(cheap|budget|best|top|affordable|premium|under \$?\d+)\b",
+    r"\b(cheap|budget|best|top|affordable|premium)\b",
+    r"(?:under|below|less than|cheaper than)\s*\$?\s*\d+",
     r"\b(laptop|phone|headphone|earbuds|charger|cable|camera|speaker|monitor|tv|watch|printer|keyboard|mouse|tablet)s?\b",
 ]
 _PRODUCT_RE = re.compile("|".join(_PRODUCT_SIGNALS), re.IGNORECASE)
@@ -388,11 +395,8 @@ def _is_general_conversation(message: str) -> bool:
     """Return True if the message is a general/conversational query with
     no product-search intent."""
     text = message.strip()
-    # Very short messages with no product keywords are likely greetings
-    if len(text.split()) <= 4 and _GENERAL_RE.search(text) and not _PRODUCT_RE.search(text):
-        return True
-    # Longer messages: only treat as general if they match a pattern AND
-    # have zero product signals
+    # Treat as general if it matches a conversational pattern AND
+    # has zero product signals
     if _GENERAL_RE.search(text) and not _PRODUCT_RE.search(text):
         return True
     return False

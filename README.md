@@ -4,6 +4,8 @@ An AI-powered multimodal shopping assistant for an electronics commerce website,
 
 **Author:** Marco Wang
 
+🚀 **Live Demo:** [huggingface.co/spaces/Marc034/al-commerce-agent](https://huggingface.co/spaces/Marc034/al-commerce-agent)
+
 ---
 
 ## Features

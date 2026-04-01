@@ -1,3 +1,12 @@
+---
+title: Al Commerce Agent
+emoji: 🛍️
+colorFrom: blue
+colorTo: purple
+sdk: docker
+app_port: 7860
+---
+
 # Al — AI-Powered Commerce Agent
 
 An AI-powered multimodal shopping assistant for an electronics commerce website, inspired by [Amazon Rufus](https://www.aboutamazon.com/news/retail/amazon-rufus). A single unified agent handles **general conversation**, **text-based product recommendations**, and **image-based product search** — all within one endpoint.

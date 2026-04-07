@@ -1,5 +1,7 @@
 # Al — AI-Powered Commerce Agent
-
+<div align="center">
+  <img src="[YOUR_GITHUB_GENERATED_URL_HERE](https://github.com/user-attachments/assets/a302a873-579e-4243-852a-1f6a1178cf52)" width="100%" alt="Al Agent Demo GIF">
+</div>
 An AI-powered multimodal shopping assistant for an electronics commerce website, inspired by [Amazon Rufus](https://www.aboutamazon.com/news/retail/amazon-rufus). A single unified agent handles **general conversation**, **text-based product recommendations**, and **image-based product search** — all within one endpoint.
 
 **Author:** Marco Wang

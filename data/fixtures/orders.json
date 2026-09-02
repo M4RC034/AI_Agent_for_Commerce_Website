@@ -1,0 +1,85 @@
+{
+  "_comment": "Fixed fixtures (FR10). Dates are stored as offsets from 'today' rather than absolute, so the return-window logic stays exercisable forever while remaining fully deterministic for a pinned AGENT_TODAY. Monetary values are integers in TWD; items_subtotal and total are computed at load time so they cannot drift out of sync with the line items.",
+
+  "orders": {
+    "ORD-1001": {
+      "status": "已送達",
+      "placed_days_ago": 6,
+      "shipped_days_ago": 5,
+      "delivered_days_ago": 3,
+      "carrier": "黑貓宅急便",
+      "tracking_no": "TCAT-880412793",
+      "shipping_fee": 0,
+      "items": [
+        {"sku": "SKU-A1", "name": "無線藍牙喇叭 SoundWave S3", "category": "Speakers", "unit_price": 1280, "quantity": 1, "returnable": true},
+        {"sku": "SKU-B2", "name": "USB-C 編織傳輸線 1.5m", "category": "Chargers & Cables", "unit_price": 290, "quantity": 2, "returnable": true}
+      ]
+    },
+
+    "ORD-1002": {
+      "status": "已送達",
+      "placed_days_ago": 24,
+      "shipped_days_ago": 22,
+      "delivered_days_ago": 20,
+      "carrier": "新竹物流",
+      "tracking_no": "HCT-551209884",
+      "shipping_fee": 0,
+      "items": [
+        {"sku": "SKU-C3", "name": "27 吋 2K 螢幕 ViewPro 27Q", "category": "Monitors", "unit_price": 5990, "quantity": 1, "returnable": true}
+      ]
+    },
+
+    "ORD-1003": {
+      "status": "已出貨",
+      "placed_days_ago": 2,
+      "shipped_days_ago": 1,
+      "delivered_days_ago": null,
+      "carrier": "黑貓宅急便",
+      "tracking_no": "TCAT-880417265",
+      "shipping_fee": 0,
+      "items": [
+        {"sku": "SKU-D4", "name": "機械式鍵盤 KeyForge 87 青軸", "category": "Computer Accessories", "unit_price": 2450, "quantity": 1, "returnable": true}
+      ]
+    },
+
+    "ORD-1004": {
+      "status": "已送達",
+      "placed_days_ago": 4,
+      "shipped_days_ago": 3,
+      "delivered_days_ago": 2,
+      "carrier": "黑貓宅急便",
+      "tracking_no": "TCAT-880419037",
+      "shipping_fee": 0,
+      "items": [
+        {"sku": "SKU-E5", "name": "真無線降噪耳機 AirLite Pro", "category": "Headphones", "unit_price": 3190, "quantity": 1, "returnable": false},
+        {"sku": "SKU-B2", "name": "USB-C 編織傳輸線 1.5m", "category": "Chargers & Cables", "unit_price": 290, "quantity": 1, "returnable": true}
+      ]
+    },
+
+    "ORD-1005": {
+      "status": "已取消",
+      "placed_days_ago": 9,
+      "shipped_days_ago": null,
+      "delivered_days_ago": null,
+      "carrier": null,
+      "tracking_no": null,
+      "shipping_fee": 80,
+      "items": [
+        {"sku": "SKU-F6", "name": "10000mAh 行動電源 PowerCell 10K", "category": "Power & Batteries", "unit_price": 890, "quantity": 1, "returnable": true}
+      ]
+    },
+
+    "ORD-1006": {
+      "status": "待出貨",
+      "placed_days_ago": 1,
+      "shipped_days_ago": null,
+      "delivered_days_ago": null,
+      "carrier": null,
+      "tracking_no": null,
+      "shipping_fee": 0,
+      "items": [
+        {"sku": "SKU-G7", "name": "14 吋輕薄筆電 NovaBook Air 14", "category": "Laptops", "unit_price": 28900, "quantity": 1, "returnable": true}
+      ]
+    }
+  }
+}

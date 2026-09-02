@@ -1,3 +1,12 @@
+anthropic>=1.0.0
+open_clip_torch>=3.0.0
+python-multipart>=0.0.22
+
+# NOTE (macOS/Apple Silicon): torch and torchvision must stay version-matched,
+# and `import torch` MUST precede `import faiss` or the first MPS op segfaults.
+# The ordering is pinned in agent/retrieval/__init__.py. Installing
+# open_clip_torch will try to pull a newer torch — if it does, reinstall the
+# matching pair (e.g. torch==2.7.0 with torchvision==0.22.0 --no-deps).
 annotated-doc==0.0.4
 annotated-types==0.7.0
 anyio==4.13.0

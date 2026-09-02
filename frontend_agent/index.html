@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>小電 — Agentic 客服助理</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="bar">
+  <div class="brand">
+    <span class="dot"></span>
+    <strong>小電</strong>
+    <span class="sub">Agentic 客服助理</span>
+  </div>
+
+  <div class="controls">
+    <div class="seg" id="mode-toggle" role="group" aria-label="檢索模式">
+      <button data-mode="rag" class="on">RAG</button>
+      <button data-mode="cag">CAG</button>
+    </div>
+    <label class="chk"><input type="checkbox" id="thinking"> 顯示思考</label>
+    <button id="reset" class="ghost">重新開始</button>
+  </div>
+</header>
+
+<main>
+  <section class="chat" id="chat-pane">
+    <div id="messages">
+      <div class="empty" id="empty">
+        <h1>問我關於訂單或商店規定的問題</h1>
+        <p>檢索不是每輪都會執行的前置步驟。模型會自己決定要不要查知識庫、要不要呼叫訂單工具，以及呼叫的順序。</p>
+        <div class="chips">
+          <button class="chip">運費怎麼算？滿多少免運？</button>
+          <button class="chip">ORD-1001 到哪了？</button>
+          <button class="chip">ORD-1001 我不想要了想退貨，可以退多少？</button>
+          <button class="chip">耳機拆封了還能退嗎？</button>
+          <button class="chip">我記得鑑賞期是 30 天對吧？</button>
+          <button class="chip">你們企業採購有什麼折扣方案？</button>
+          <button class="chip">你們跟 momo 誰比較便宜？</button>
+          <button class="chip" data-hint="image">📎 附一張商品照片找相似商品</button>
+        </div>
+      </div>
+    </div>
+
+    <form class="composer" id="composer">
+      <label class="attach" for="file" title="附上商品照片">
+        <input type="file" id="file" accept="image/*" hidden>
+        <span aria-hidden="true">📎</span>
+        <span class="sr">附上商品照片</span>
+      </label>
+      <input id="input" autocomplete="off" placeholder="輸入問題，或附上商品照片…" aria-label="訊息">
+      <button id="send" type="submit" aria-label="送出">送出</button>
+    </form>
+    <div id="preview" hidden>
+      <img id="preview-img" alt="待送出的商品照片">
+      <button id="preview-clear" type="button">移除</button>
+    </div>
+  </section>
+
+  <aside class="trace" id="trace-pane">
+    <div class="trace-head">
+      <strong>執行軌跡</strong>
+      <span class="hint" id="trace-meta">尚未開始</span>
+    </div>
+    <div id="trace-body">
+      <p class="trace-empty">模型每一步的決策會顯示在這裡：檢索查詢、充分性判斷、工具呼叫與回傳值。這與評測用來評分的是同一份記錄。</p>
+    </div>
+  </aside>
+</main>
+
+<script src="app.js"></script>
+</body>
+</html>

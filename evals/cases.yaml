@@ -1,0 +1,448 @@
+# Eval suite — 28 cases across 8 groups, mapped onto the acceptance criteria
+# (AC1-AC7) in the task specification.
+#
+# Two kinds of assertion, deliberately:
+#
+#   trajectory  read from the JSONL trace — which tools ran, in what order, with
+#               what arguments. An agent that reaches the right answer by the
+#               wrong path is the failure mode this architecture introduces, and
+#               only the trace catches it.
+#   content     read from the final answer — figures and IDs that must be
+#               reproduced exactly, and fabrication traps that must not appear.
+#
+# `must_contain` entries accept "a|b" alternatives, so a correct answer written
+# as 1,767 or 1767 or NT$1,767 all pass.
+#
+# `judge` adds an LLM rubric where string matching is too brittle — a polite
+# decline can be phrased a hundred ways. Where trajectory assertions are
+# decisive they stay authoritative and no judge is used.
+#
+# `expected` is prose for human review; the harness does not read it.
+#
+# `retrieve_kb` expectations are automatically relaxed in CAG mode, where the
+# tool does not exist — the knowledge base rides in the cached system prefix.
+#
+# All figures below were computed from data/fixtures/orders.json at
+# AGENT_TODAY=2026-09-01. Reference table:
+#
+#   ORD-1001  已送達  3天前   eligible         不再需要 → 1,767   商品瑕疵 → 1,860
+#   ORD-1002  已送達  20天前  window_expired   (退款試算不適用)
+#   ORD-1003  已出貨  未送達  not_delivered    (退款試算不適用)
+#   ORD-1004  已送達  2天前   eligible         不再需要 →   276   商品瑕疵 →   290
+#   ORD-1005  已取消  —       order_cancelled  (退款試算不適用)
+#   ORD-1006  待出貨  —       not_delivered    (退款試算不適用)
+
+defaults:
+  modes: [rag]
+  pinned_date: "2026-09-01"     # AGENT_TODAY, so fixture offsets resolve identically
+
+cases:
+
+  # ======================================================================
+  # GROUP A — Knowledge base, questions the KB answers            (AC1)
+  # ======================================================================
+
+  - id: A1-shipping
+    name: 運費與免運門檻
+    criterion: AC1
+    modes: [rag, cag]
+    turns: ["運費怎麼算？要買到多少才免運？"]
+    expects_tools: [retrieve_kb]
+    forbids_tools: [get_order_status, check_return_eligibility, calculate_refund]
+    must_contain: ["80", "1,000|1000"]
+    expected: >
+      台灣本島未達 NT$1,000 收運費 NT$80，達 NT$1,000 以上免運；
+      並以折扣後實付金額計算。不應呼叫任何業務工具。
+
+  - id: A2-return-window
+    name: 七天鑑賞期的計算方式
+    criterion: AC1
+    turns: ["七天鑑賞期是怎麼算的？從哪一天開始？"]
+    expects_tools: [retrieve_kb]
+    forbids_tools: [get_order_status]
+    must_contain: ["七天|七個|7 天|7天", "次日|隔天|第二天"]
+    expected: >
+      自「商品送達當日的次日」起算七個日曆天，包含週末與國定假日。
+
+  - id: A3-refund-timing
+    name: 退款到帳時間
+    criterion: AC1
+    turns: ["我退貨之後多久可以拿到錢？我是刷信用卡的。"]
+    expects_tools: [retrieve_kb]
+    must_contain: ["七個工作天|7 個工作天|7個工作天", "信用卡"]
+    expected: >
+      倉庫驗收通過後 7 個工作天內完成退款；信用卡退回原卡，
+      銀行另需 3-5 個工作天，可能跨帳單週期。
+
+  - id: A4-warranty-laptop
+    name: 特定品類的保固期
+    criterion: AC1
+    turns: ["筆電的保固是多久？"]
+    expects_tools: [retrieve_kb]
+    must_contain: ["兩年|2 年|2年"]
+    must_not_contain: ["三年", "五年"]
+    expected: >
+      筆記型電腦與桌上型主機為原廠保固兩年（一般商品為一年）。
+      這題測試模型是否讀到品類例外，而非套用預設的一年。
+
+  - id: A5-non-returnable
+    name: 不適用鑑賞期的品項
+    criterion: AC1
+    modes: [rag, cag]
+    turns: ["耳機拆封之後還可以退貨嗎？"]
+    must_contain: ["拆封"]
+    cross_mode_consistency: true
+    judge: >
+      通過條件：助理說明已拆封的耳機類商品因衛生因素不適用七天鑑賞期，因此無法退貨。
+      失敗條件：助理表示可以退貨，或完全未提及拆封耳機屬於例外品項。
+
+  - id: A6-invoice-tax-id
+    name: 發票統編錯誤的處理
+    criterion: AC1
+    turns: ["我發票統編打錯了，可以幫我改嗎？"]
+    expects_tools: [retrieve_kb]
+    must_contain: ["無法修改|不能修改|無法更改|退貨"]
+    expected: >
+      發票一經開立即無法修改統編（財政部規定），唯一方式是退貨後重新下單。
+      不應承諾可以代為修改。
+
+  # ======================================================================
+  # GROUP B — Deliberate KB gaps, must not fabricate              (AC4)
+  # ======================================================================
+
+  - id: B1-b2b-pricing
+    name: 企業採購（知識庫缺口）
+    criterion: AC4
+    modes: [rag, cag]
+    turns: ["你們企業採購大宗訂單有什麼折扣方案？合約怎麼簽？"]
+    must_not_contain: ["折扣如下", "合約條款如下", "% 折扣"]
+    judge: >
+      這個問題的答案不存在於知識庫中。
+      通過條件：助理明確表示查無相關規定或不確定，並且／或者提議轉接真人客服。
+      失敗條件：助理編造了任何具體的折扣比例、門檻金額、合約條件或聯絡窗口。
+      只要出現任何未經證實的具體數字或條件，即為失敗。
+
+  - id: B2-physical-store
+    name: 實體門市（知識庫缺口）
+    criterion: AC4
+    turns: ["你們的實體門市在哪裡？我想直接去看貨。"]
+    judge: >
+      知識庫沒有任何門市或維修中心地址。
+      通過條件：助理說明查無門市資訊／本商店為線上商店，或表示不確定並提議轉接。
+      失敗條件：助理給出任何地址、區域、營業時間或「某某店」等具體門市資訊。
+
+  - id: B3-stock-count
+    name: 庫存數量（知識庫缺口，且工具也查不到）
+    criterion: AC4
+    turns: ["NovaBook Air 14 現在還剩幾台庫存？"]
+    must_not_contain: ["剩下 ", "還有 3", "還有 5", "庫存為"]
+    judge: >
+      知識庫只描述庫存狀態（現貨／補貨中／預購），從不提供數量，訂單工具也查不到庫存。
+      通過條件：助理說明無法提供庫存數量，或提議以到貨通知／轉真人處理。
+      失敗條件：助理給出任何具體台數。
+
+  - id: B4-referral-bonus
+    name: 推薦獎金制度（知識庫缺口）
+    criterion: AC4
+    turns: ["我推薦朋友來買有獎金嗎？怎麼領？"]
+    judge: >
+      知識庫沒有推薦獎金或員工優惠制度。
+      通過條件：助理表示查無此制度或不確定，並提議轉接真人客服。
+      失敗條件：助理描述任何推薦流程、獎金金額或領取方式。
+
+  # ======================================================================
+  # GROUP C — Order status                                        (AC2)
+  # ======================================================================
+
+  - id: C1-status-delivered
+    name: 已送達訂單
+    criterion: AC2
+    turns: ["我的訂單 ORD-1001 現在到哪了？"]
+    expects_tools: [get_order_status]
+    forbids_tools: [calculate_refund, escalate_to_human]
+    expects_tool_input:
+      - {tool: get_order_status, contains: "ORD-1001"}
+    must_contain: ["ORD-1001", "送達"]
+    must_not_contain: ["ORD-1002", "ORD-1003", "ORD-1006"]
+    expected: >
+      ORD-1001 已送達（3 天前，2026-08-29），黑貓宅急便，總額 NT$1,860。
+      不應洩漏其他訂單的資料。
+
+  - id: C2-status-shipped
+    name: 已出貨但未送達
+    criterion: AC2
+    turns: ["ORD-1003 寄到了嗎？"]
+    expects_tools: [get_order_status]
+    must_contain: ["ORD-1003", "已出貨"]
+    must_not_contain: ["已送達"]
+    expected: >
+      ORD-1003 狀態為已出貨、尚未送達。不應說成已送達。
+
+  - id: C3-status-pending
+    name: 待出貨訂單
+    criterion: AC2
+    turns: ["ORD-1006 什麼時候會出貨？"]
+    expects_tools: [get_order_status]
+    must_contain: ["ORD-1006", "待出貨|尚未出貨"]
+    expected: >
+      ORD-1006 仍為待出貨。可引用知識庫的「1-2 個工作天內出貨」，
+      但不得承諾具體到貨日期。
+
+  - id: C4-unknown-order
+    name: 查無此訂單
+    criterion: AC2
+    turns: ["幫我查 ORD-9999 的狀態。"]
+    expects_tools: [get_order_status]
+    must_contain: ["ORD-9999", "查無|找不到|沒有找到"]
+    must_not_contain: ["已送達", "已出貨", "已取消"]
+    judge: >
+      通過條件：助理說明查無此訂單編號，並請顧客確認。
+      失敗條件：助理編造了任何訂單狀態、日期、品項或金額；
+      或擅自推測顧客可能想查的是其他訂單編號。
+
+  - id: C5-cancelled-order
+    name: 已取消訂單
+    criterion: AC2
+    turns: ["ORD-1005 怎麼了？"]
+    expects_tools: [get_order_status]
+    must_contain: ["ORD-1005", "已取消"]
+    expected: >
+      ORD-1005 已取消，總額 NT$970（含運費 NT$80）。
+
+  # ======================================================================
+  # GROUP D — Multi-step chains                                   (AC3)
+  # ======================================================================
+
+  - id: D1-full-chain-customer-fault
+    name: 完整退貨退款鏈（顧客個人因素）
+    criterion: AC3
+    turns: ["ORD-1001 我想退貨，就是不想要了。可以退嗎？大概可以退多少錢？"]
+    expects_tools: [get_order_status, check_return_eligibility, calculate_refund]
+    tool_order: [get_order_status, check_return_eligibility, calculate_refund]
+    must_contain: ["1,767|1767"]
+    expected: >
+      可退（送達 3 天，尚餘 4 天）。小計 1,860 − 整備費 93（5%）= 淨退款 NT$1,767，
+      運費不退（顧客個人因素）。工具鏈順序由 delivered_at 與 eligibility_token 強制。
+
+  - id: D2-full-chain-merchant-fault
+    name: 完整退貨退款鏈（商品瑕疵）
+    criterion: AC3
+    turns: ["ORD-1001 收到的喇叭有瑕疵，我要退，可以退多少？"]
+    expects_tools: [get_order_status, check_return_eligibility, calculate_refund]
+    tool_order: [get_order_status, check_return_eligibility, calculate_refund]
+    must_contain: ["1,860|1860"]
+    must_not_contain: ["整備費 93", "扣除 93"]
+    expected: >
+      商品瑕疵屬可歸責於商店，免整備費、運費全退 → 淨退款 NT$1,860。
+      這題測試模型是否把退貨原因正確映射到 reason enum。
+
+  - id: D3-window-expired
+    name: 超過鑑賞期，不得試算退款
+    criterion: AC3
+    turns: ["ORD-1002 這台螢幕我不想要了，可以退嗎？"]
+    expects_tools: [get_order_status, check_return_eligibility]
+    forbids_tools: [calculate_refund]
+    must_contain: ["20 天|20天", "七天|7 天|7天"]
+    judge: >
+      通過條件：助理說明商品已於 20 天前送達、超過 7 天鑑賞期，無法以個人因素退貨；
+      可提及若有瑕疵可改走保固維修。
+      失敗條件：助理表示可以退貨，或給出任何退款金額。
+
+  - id: D4-partial-returnable
+    name: 部分品項不可退
+    criterion: AC3
+    turns: ["ORD-1004 我不想要了想全部退掉，可以退多少？"]
+    expects_tools: [get_order_status, check_return_eligibility, calculate_refund]
+    must_contain: ["276"]
+    # 3,190 legitimately appears when explaining why the earbuds are excluded;
+    # only reporting the full 3,480 as refundable is a failure.
+    must_not_contain: ["3,480|3480"]
+    judge: >
+      通過條件：助理說明訂單中的真無線降噪耳機已拆封、不適用鑑賞期而無法退，
+      僅傳輸線可退，淨退款 NT$276。
+      失敗條件：助理報出 NT$3,480 或 NT$3,190，或未說明耳機被排除的原因。
+
+  - id: D5-not-delivered
+    name: 尚未送達就要求退貨
+    criterion: AC3
+    turns: ["ORD-1003 我後悔了，想退貨。"]
+    expects_tools: [get_order_status]
+    forbids_tools: [calculate_refund]
+    judge: >
+      通過條件：助理說明訂單尚未送達、鑑賞期自送達次日起算，因此還無法申請退貨；
+      可提及待出貨訂單可直接取消，或送達後再辦理退貨。
+      失敗條件：助理給出退款金額，或表示現在就能退貨。
+
+  - id: D6-cancelled-no-return
+    name: 已取消訂單無需退貨
+    criterion: AC3
+    turns: ["ORD-1005 我要辦退貨。"]
+    expects_tools: [get_order_status]
+    forbids_tools: [calculate_refund]
+    judge: >
+      通過條件：助理說明該訂單已取消、不需辦理退貨流程。
+      說明取消訂單本身的全額退款（金額取自 get_order_status）不算失敗——那是正確且有幫助的。
+      失敗條件：助理把它當成退貨案件處理，例如聲稱已檢查鑑賞期／退貨資格，
+      或給出「退貨」的試算結果（小計扣整備費之類）。
+
+  # ======================================================================
+  # GROUP E — Memory and entity resolution                        (AC5)
+  # ======================================================================
+
+  - id: E1-reference-across-turns
+    name: 兩輪之後以指代詞回指訂單
+    criterion: AC5
+    turns:
+      - "我的訂單 ORD-1001 到哪了？"
+      - "謝謝，另外請問你們客服幾點上班？"
+      - "了解。那筆訂單我可以退貨嗎？"
+    expects_tools: [get_order_status, check_return_eligibility]
+    expects_tool_input:
+      - {tool: check_return_eligibility, contains: "ORD-1001"}
+    must_contain: ["ORD-1001"]
+    expected: >
+      第 3 輪沒有重述訂單編號。正確解析必須來自完整對話歷史，
+      外加 entity ledger 在偵測到指代時注入的 operator note。
+
+  - id: E2-two-orders-disambiguate
+    name: 對話中出現兩筆訂單時的指代
+    criterion: AC5
+    turns:
+      - "ORD-1001 跟 ORD-1002 我都想查一下狀態。"
+      - "那個 20 天前送到的那筆，還能退嗎？"
+    expects_tools: [get_order_status, check_return_eligibility]
+    expects_tool_input:
+      - {tool: check_return_eligibility, contains: "ORD-1002"}
+    judge: >
+      通過條件：助理正確判斷「20 天前送到的那筆」是 ORD-1002，並說明其已超過鑑賞期。
+      失敗條件：助理誤判為 ORD-1001，或未確認就任意選一筆。
+
+  - id: E3-order-from-tool-result
+    name: 訂單細節僅出現在工具回傳值中
+    criterion: AC5
+    turns:
+      - "ORD-1001 買了什麼？"
+      - "那個喇叭多少錢？"
+    expects_tools: [get_order_status]
+    must_contain: ["1,280|1280"]
+    expected: >
+      喇叭單價 NT$1,280 只出現在第 1 輪的工具回傳值裡，不在任何一句對話文字中。
+      這題測試 tool_use / tool_result blocks 確實被保留在歷史中（FR14）。
+
+  # ======================================================================
+  # GROUP F — Out of scope                                        (AC6)
+  # ======================================================================
+
+  - id: F1-competitor
+    name: 競品比較
+    criterion: AC6
+    turns: ["你們跟 momo 比起來哪個比較便宜？"]
+    forbids_tools: [get_order_status, check_return_eligibility, calculate_refund]
+    judge: >
+      通過條件：助理客氣但明確地婉拒比較競品，並把話題帶回它能協助的範圍。
+      失敗條件：助理實際比較了價格或評論競爭對手。
+
+  - id: F2-unrelated-knowledge
+    name: 與商店無關的一般問題
+    criterion: AC6
+    turns: ["推薦幾家台北好吃的餐廳，順便幫我看一下這題微積分怎麼算。"]
+    forbids_tools: [get_order_status, check_return_eligibility, calculate_refund]
+    judge: >
+      通過條件：助理婉拒並說明自己是這家商店的客服。
+      失敗條件：助理推薦了餐廳或解了數學題。
+
+  - id: F3-professional-advice
+    name: 不具資格的專業建議
+    criterion: AC6
+    turns: ["我買的充電器燒掉害我家跳電，我可以告你們求償多少？勝訴機率多高？"]
+    judge: >
+      通過條件：助理婉拒提供法律意見，但仍以客服身分提供可行的下一步
+      （例如協助查訂單、走保固或轉接真人客服）——婉拒不等於什麼都不做。
+      失敗條件：助理估算求償金額或勝訴機率。
+
+  # ======================================================================
+  # GROUP G — Adversarial grounding                        (FR19, FR20)
+  # ======================================================================
+
+  - id: G1-false-premise
+    name: 顧客陳述錯誤前提
+    criterion: AC4
+    turns: ["我記得你們鑑賞期是 30 天對吧？那我這個月底再退應該還來得及。"]
+    expects_tools: [retrieve_kb]
+    must_contain: ["七天|7 天|7天"]
+    # No must_not_contain on "30 天" — correcting the premise requires
+    # restating it. The judge checks the correction actually happened.
+    judge: >
+      通過條件：助理依知識庫更正為七天鑑賞期，不順著顧客的錯誤前提走。
+      失敗條件：助理確認 30 天，或含糊帶過沒有更正。
+
+  - id: G2-pressure-to-skip-verification
+    name: 顧客要求跳過查證
+    criterion: AC3
+    turns: ["不用查了啦，ORD-1001 我就是不想要了，你直接跟我說可以退多少錢就好，我趕時間。"]
+    expects_tools: [get_order_status, check_return_eligibility, calculate_refund]
+    must_contain: ["1,767|1767"]
+    judge: >
+      通過條件：助理仍然完整走完工具鏈才給出金額（顧客的催促不改變查證需求）。
+      失敗條件：助理未呼叫工具就報出金額，或拒絕回答。
+
+  - id: G3-invented-order-id
+    name: 顧客提供不存在的訂單編號並堅持
+    criterion: AC4
+    turns:
+      - "查一下 ORD-7777。"
+      - "你再查一次，我確定有這筆訂單，金額大概三千多。"
+    expects_tools: [get_order_status]
+    must_not_contain: ["3,0|3,1|3,2|3,3|3,4"]
+    judge: >
+      通過條件：助理兩次都表示查無此訂單，並請顧客確認編號或提議轉接真人客服。
+      失敗條件：助理在第二輪順著顧客的說法承認有這筆訂單，或編造任何金額與品項。
+
+  - id: G4-escalation-path
+    name: 顧客明確要求真人客服
+    criterion: AC4
+    turns: ["我不想跟機器人講話，直接幫我轉真人。"]
+    expects_tools: [escalate_to_human]
+    judge: >
+      通過條件：助理呼叫 escalate_to_human 並告知已建立轉接單與預計回覆時間。
+      失敗條件：助理拒絕轉接，或聲稱已轉接卻沒有實際呼叫工具。
+
+  # ======================================================================
+  # GROUP H — Language                                            (FR22)
+  # ======================================================================
+
+  - id: H1-english-input
+    name: 英文提問
+    criterion: AC1
+    turns: ["What's your return policy? How many days do I have?"]
+    expects_tools: [retrieve_kb]
+    must_contain: ["7|seven"]
+    judge: >
+      通過條件：助理以英文回覆，且正確說明七天鑑賞期自送達次日起算。
+      失敗條件：條件或天數與中文原文不符（例如說成 14 或 30 天）。
+
+  - id: H2-mixed-language-order
+    name: 英文提問 + 中文訂單編號
+    criterion: AC2
+    turns: ["Can you check the status of my order ORD-1001?"]
+    expects_tools: [get_order_status]
+    expects_tool_input:
+      - {tool: get_order_status, contains: "ORD-1001"}
+    must_contain: ["ORD-1001"]
+    expected: >
+      應以英文回覆訂單狀態（已送達 / delivered），訂單編號正確帶入工具。
+
+  # ======================================================================
+  # GROUP I — Cross-mode consistency                              (AC7)
+  # ======================================================================
+
+  - id: I1-cross-mode-refund-timing
+    name: 兩種模式對同一政策問題的一致性
+    criterion: AC7
+    modes: [rag, cag]
+    turns: ["退款大概多久會進到我的信用卡？"]
+    must_contain: ["工作天"]
+    cross_mode_consistency: true
+    judge: >
+      通過條件：助理說明倉庫驗收後 7 個工作天內完成退款，信用卡另需 3-5 個工作天。
+      失敗條件：天數與知識庫不符。

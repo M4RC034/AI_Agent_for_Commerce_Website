@@ -23,6 +23,7 @@ data/processed/*.index
 data/processed/*.jsonl
 data/raw/
 image/
+maiagent-oa-task1-requirements.md
 
 # IDE
 .vscode/
@@ -32,3 +33,8 @@ image/
 
 # Misc
 *.log
+
+# Task 1 agent
+.venv/
+logs/
+evals/traces/

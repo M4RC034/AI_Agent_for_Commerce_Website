@@ -37,4 +37,8 @@ maiagent-oa-task1-requirements.md
 # Task 1 agent
 .venv/
 logs/
-evals/traces/
+
+# evals/traces/ is deliberately TRACKED (224KB): it is the evidence behind
+# evals/report.md and the numbers scripts/trace_stats.py regenerates. Without
+# it a reviewer cannot verify any measured claim without an API key.
+# data/processed/*.index stays ignored — products.index alone is 25MB.

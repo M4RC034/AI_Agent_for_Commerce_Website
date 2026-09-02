@@ -120,7 +120,7 @@ model may or may not reach for.
 | SentenceTransformer wrapper | **Adapted** | Same encode/normalize call; checkpoint `all-MiniLM-L6-v2` → `BAAI/bge-m3` |
 | CrossEncoder rerank stage | **Adapted** | Same `.predict(pairs)` → sort → truncate; checkpoint → `BAAI/bge-reranker-v2-m3` |
 | Two-stage retrieve-then-rerank design | **Reused** | Cast wide (k=15), then slice precisely (top 4) — the source project's idea |
-| FastAPI app, OpenCLIP index, product catalog | **Untouched** | Left intact as the documented "before" state. Not currently runnable — its catalog index was never rebuilt (see next steps) |
+| FastAPI app, OpenCLIP index, product catalog | **Untouched** | Left intact as the documented "before" state. Runnable once its own indices are rebuilt from `data/raw/` via the `src/` scripts |
 | Deterministic pipeline in `main.py` | **Replaced** | Intent regex, price regex, category whitelist, badge parsing — all gone, not wrapped |
 | Agent loop | **New** | Manual `tool_use` loop over the Messages API |
 | Business tool layer | **New** | Four tools with a data-enforced dependency chain |
@@ -177,10 +177,10 @@ Sonnet is also **faster**, which is not the direction this trade usually runs:
 
 | | Sonnet 5 | Opus 5 |
 |---|---|---|
-| Median case latency | **8.1 s** | 11.4 s |
-| Full suite wall-clock | **322 s** | 412 s |
+| Median case latency | **9.4 s** | 11.4 s |
+| Full suite wall-clock | **388 s** | 412 s |
 | Cost per full eval run | **~$1.43** | ~$3.56 |
-| Suite result | 37/38 | 38/38 |
+| Suite result | 37–38/38 | 38/38 |
 | Mid-conversation `role: "system"` | no — falls back | yes |
 | English replies | best-effort (~1/3) | reliable |
 
@@ -342,9 +342,11 @@ python -m agent.cli --show-thinking       # render summarised reasoning
 python -m agent.cli --once "運費怎麼算？"
 ```
 
-The model defaults to `claude-opus-5` and is overridable:
-`AGENT_MODEL=claude-haiku-4-5 python -m agent.cli` costs about a fifth as much
-per turn. Nothing in the loop depends on the model choice.
+The model defaults to `claude-sonnet-5` and is overridable:
+`AGENT_MODEL=claude-haiku-4-5 python -m agent.cli` costs about half as much
+again per turn, `AGENT_MODEL=claude-opus-5` buys reliable English replies. See
+[Model choice](#model-choice--sonnet-5-and-what-it-costs). Nothing in the loop
+depends on which model is used.
 
 First run downloads `bge-m3` and `bge-reranker-v2-m3` (~2.2GB each). Set
 `AGENT_EMBED_MODEL=intfloat/multilingual-e5-base` for a lighter 768D encoder —
@@ -496,15 +498,19 @@ hundred ways. Where trajectory assertions are decisive they stay authoritative.
 
 ### Results
 
-**37/38 pass** on the shipped default `claude-sonnet-5` (34 cases; A1, A5, B1
-and I1 also run in CAG mode). The same suite is **38/38 on `claude-opus-5`**.
-Full report in [evals/report.md](evals/report.md), raw traces in `evals/traces/`.
+**37–38/38 on the shipped default `claude-sonnet-5`**, and **38/38 on
+`claude-opus-5`**, consistently. 34 cases; A1, A5, B1 and I1 also run in CAG
+mode. Full report in [evals/report.md](evals/report.md), raw traces in
+`evals/traces/` — every number below comes from a single run.
 
-The single Sonnet failure is `H1-english-input` — an English question answered in
-Chinese. It is flaky rather than deterministic (~1 in 3) and the *content* is
-correct; only the language is wrong. See
-[Model choice](#model-choice--sonnet-5-and-what-it-costs) for why, and why more
-prompt engineering is the wrong fix.
+The range is one case. `H1-english-input` asks a question in English and checks
+the reply is in English; on Sonnet it passes roughly **1 run in 3** — the latest
+full run scored 38/38, an earlier one 37/38 with H1 as the failure. The *content*
+is correct either way; only the language is wrong. Opus passes it without prompt
+work, which is why the honest summary of Sonnet is "everything works, English
+replies are unreliable" rather than a clean sweep. See
+[Model choice](#model-choice--sonnet-5-and-what-it-costs) for the three prompt
+strategies that failed to fix it.
 
 | Group | Cases | Result |
 |---|---|---|
@@ -515,7 +521,7 @@ prompt engineering is the wrong fix.
 | E — memory | 3 | 3/3 |
 | F — out of scope | 3 | 3/3 |
 | G — adversarial grounding | 4 | 4/4 |
-| H — language | 2 | 1/2 on Sonnet, 2/2 on Opus |
+| H — language | 2 | 2/2 here, but H1 passes ~1/3 of runs on Sonnet |
 | I — cross-mode | 1 (+1 CAG) | 2/2 |
 
 Getting there took three rounds, and **every failure investigated was a defect
@@ -539,13 +545,16 @@ The first Opus figure was 34/38. That number measured the suite, not the system.
 
 ### Measured behaviour
 
-Retrieval self-correction (FR3) fired **3 times** across the suite: the first
-query came back `insufficient`, the agent reformulated, and then reported the
-gap rather than guessing. Visible in the step counts — the KB-gap cases take 4
-steps in RAG mode against 2 in CAG, because CAG has nothing to reformulate.
+Retrieval self-correction (FR3) fired **once** in this run: the first query came
+back short, the agent reformulated, then reported the gap rather than guessing.
+The trace shows it as a `retrieve_kb → retrieve_kb` sequence with
+`reformulation_of` set. It fires more often on harder KB-gap phrasings — earlier
+runs saw three — so treat one as a floor, not a rate.
 
-Prompt caching is confirmed live: **13,302 cache-read tokens** on a CAG turn
+Prompt caching is confirmed live: median **14,016 cache-read tokens** per CAG run
 against **90 uncached**, i.e. the whole KB prefix served at 0.1x input price.
+
+All of the above regenerate with `python scripts/trace_stats.py`.
 
 ## RAG vs CAG — measured
 
@@ -553,20 +562,24 @@ Median per run, from the traces:
 
 | | Mode A (RAG) | Mode B (CAG) |
 |---|---|---|
-| Model latency | 9.67 s | 7.41 s |
-| Tool latency | 1.82 s | 0.00 s |
+| Model latency | 7.83 s | 6.69 s |
 | Steps | 2 | 1 |
-| Uncached input | 1,294 tok | 90 tok |
-| Cache read | 8,492 tok | 13,302 tok |
+| Uncached input | 1,038 tok | 90 tok |
+| Cache read | 9,920 tok | 14,016 tok |
 
 On the four cases that run in both modes:
 
 ```
-A1-shipping                   RAG 20.3s / 2 steps    CAG  6.8s / 1 step
-A5-non-returnable             RAG  8.2s / 2 steps    CAG  7.7s / 1 step
-B1-b2b-pricing (KB gap)       RAG 21.4s / 4 steps    CAG  9.5s / 2 steps
-I1-refund-timing              RAG  9.7s / 2 steps    CAG  7.1s / 1 step
+A1-shipping                   RAG 24.1s / 2 steps    CAG 7.1s / 1 step
+A5-non-returnable             RAG 11.3s / 2 steps    CAG 4.9s / 1 step
+B1-b2b-pricing (KB gap)       RAG  7.9s / 2 steps    CAG 9.1s / 2 steps
+I1-refund-timing              RAG  9.8s / 2 steps    CAG 6.3s / 1 step
 ```
+
+B1 is the honest exception: on this run CAG was marginally *slower*, because the
+KB-gap case needs two steps in both modes and CAG carries the larger prefix.
+Per-case latency at this sample size is noisy; the median across all runs is the
+number to trust.
 
 CAG wins on every axis at this corpus size, and the reason is structural rather
 than incidental: it removes a whole round-trip from the turn. RAG must call
@@ -589,9 +602,12 @@ The brief lists Multi-Agent as an optional capability. This system deliberately
 does not use one, and the evidence is in its own traces:
 
 ```
-tool calls issued per step:   1 tool → 41 steps
-                              2 tools →  2 steps
+tool calls issued per step:   1 tool → 42 steps  (95.5%)
+                              2 tools →  2 steps  ( 4.5%)
 ```
+
+Reproduce with `python scripts/trace_stats.py`, which reads `evals/traces/*.jsonl`
+— the same records the eval harness scores trajectories from.
 
 The work is a **dependency chain, not a fan-out**. `get_order_status →
 check_return_eligibility → calculate_refund` is strictly sequential because each
@@ -613,7 +629,7 @@ Four more specific reasons:
    untruncated history; the agent recalls a tracking number from a tool result
    four turns earlier with no tool call. Fragment the history and you either
    share it (gaining nothing) or you don't (breaking AC5).
-4. **Tool selection is not the bottleneck.** 37/38 on Sonnet, 38/38 on Opus, and
+4. **Tool selection is not the bottleneck.** 37–38/38 on Sonnet, 38/38 on Opus, and
    no regression when the tool surface grew from five to six.
 
 Latency matters too: the median turn is 8.1 s and would roughly double with a
@@ -635,9 +651,9 @@ to duplicate a guarantee the architecture already provides structurally.
 
 ## Next steps toward production
 
-- **Harden the eval suite before trusting a green board.** 37/38 on Sonnet
-  (38/38 on Opus) is a real result, but it took three rounds to get a suite that
-  measures the system
+- **Harden the eval suite before trusting a green board.** 37–38/38 on Sonnet
+  and 38/38 on Opus is a real result, but it took three rounds to get a suite
+  that measures the system
   rather than my assumptions, and a suite that only ever passes has stopped
   being informative. The next additions should be cases the agent is expected to
   fail — a KB with two contradictory policies, a tool that times out, a customer
@@ -646,11 +662,12 @@ to duplicate a guarantee the architecture already provides structurally.
   tool usage, but it still cannot see retrieved chunks, so it cannot yet verify
   that a quoted policy actually appears in the KB. That is the check most worth
   having for a grounding-critical system.
-- **Multimodal (FR23) was scoped out.** `data/` is gitignored and absent, so the
-  OpenCLIP index and product catalog would need a Kaggle re-download and an image
-  crawl to rebuild. `search_products_by_image` is therefore not implemented
-  rather than half-implemented. The wrapper in `backend/search_engine.py` is
-  ready to be adapted when the data is restored.
+- **Multimodal (FR23) is built and measured above; its index is not shipped.**
+  `data/processed/*.index` is gitignored (`products.index` alone is 25 MB), so a
+  fresh clone needs the Kaggle download plus `python scripts/build_product_index.py`
+  (~60 s, no image crawl) before `search_products_by_image` will run. The tool is
+  withheld from the model automatically when the index is absent, rather than
+  advertised and failing.
 - **Real order backend.** `OrderStore` reads a JSON fixture behind a clean
   interface; swapping it for an API client touches one class.
 - **Session persistence.** Conversations are in-memory. Production needs the
@@ -672,6 +689,6 @@ to duplicate a guarantee the architecture already provides structurally.
 - **Planning** — Claude (Opus 5) via the Claude web interface, to turn the assessment brief into a detailed requirements specification and to reason through the architecture before any code was written.
 - **Implementation** — Claude Code (Opus 5). It read the source project directly, produced the phased implementation plan, and wrote the `agent/`, `scripts/`, and `evals/` packages, the zh-TW knowledge base, and this README.
 - **Human direction** — scope decisions (dropping the multimodal stretch, keeping the FastAPI app), the tool-schema review gate before the executors were written, and acceptance of the final design were mine.
-- **Verification** — the tool chain, grounding backstops, threshold calibration, and loop mechanics were tested and their outputs inspected; the full eval suite was then run live against the API on both Sonnet 5 (37/38) and Opus 5 (38/38). Every reported failure was investigated against the raw traces rather than taken at face value, which is how the judge's trajectory blindness was found — it was failing runs whose traces showed the correct tool chain.
+- **Verification** — the tool chain, grounding backstops, threshold calibration, and loop mechanics were tested and their outputs inspected; the full eval suite was then run live against the API on both Sonnet 5 (37–38/38, the variance being one flaky English-language case) and Opus 5 (38/38). Every reported failure was investigated against the raw traces rather than taken at face value, which is how the judge's trajectory blindness was found — it was failing runs whose traces showed the correct tool chain.
 
 Every number in this README that is presented as measured — the rerank score bands, the system-block sizes, the refund figures — came from running the code, not from estimation.

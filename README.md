@@ -1,4 +1,4 @@
-# 小電 — Agentic Customer Service Agent
+# Agentic Customer Service Agent
 
 An e-commerce customer-service agent for Traditional Chinese (zh-TW), built on
 Claude's native `tool_use`. Retrieval, tool selection, and tool ordering are all

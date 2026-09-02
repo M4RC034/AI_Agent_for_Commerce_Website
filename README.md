@@ -688,7 +688,7 @@ to duplicate a guarantee the architecture already provides structurally.
 
 - **Planning** — Claude (Opus 5) via the Claude web interface, to turn the assessment brief into a detailed requirements specification and to reason through the architecture before any code was written.
 - **Implementation** — Claude Code (Opus 5). It read the source project directly, produced the phased implementation plan, and wrote the `agent/`, `scripts/`, and `evals/` packages, the zh-TW knowledge base, and this README.
-- **Human direction** — scope decisions (dropping the multimodal stretch, keeping the FastAPI app), the tool-schema review gate before the executors were written, and acceptance of the final design were mine.
+- **Human direction** — scope decisions (keeping the FastAPI app intact as the "before" state), the tool-schema review gate before the executors were written, and acceptance of the final design were mine.
 - **Verification** — the tool chain, grounding backstops, threshold calibration, and loop mechanics were tested and their outputs inspected; the full eval suite was then run live against the API on both Sonnet 5 (37–38/38, the variance being one flaky English-language case) and Opus 5 (38/38). Every reported failure was investigated against the raw traces rather than taken at face value, which is how the judge's trajectory blindness was found — it was failing runs whose traces showed the correct tool chain.
 
 Every number in this README that is presented as measured — the rerank score bands, the system-block sizes, the refund figures — came from running the code, not from estimation.

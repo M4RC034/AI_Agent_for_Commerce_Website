@@ -4,10 +4,8 @@ An e-commerce customer-service agent for Traditional Chinese (zh-TW), built on
 Claude's native `tool_use`. Retrieval, tool selection, and tool ordering are all
 decided by the model at runtime — there is no pipeline.
 
-This is **MaiAgent OA Part 2, Task 1**. It is built on top of, and deliberately
-contrasted with, the [Multimodal Commerce Agent](documentation/original_README.md)
-in `backend/` — that project's FastAPI app is left running and untouched so the
-before/after comparison is concrete rather than asserted.
+This is built on top of, and deliberately contrasted with, the [Multimodal Commerce Agent](documentation/original_README.md)
+in `backend/` — that project's FastAPI app is left running and untouched so the before/after comparison is concrete rather than asserted.
 
 **Author:** Marco Wang
 
